@@ -2,59 +2,55 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Volle Kontrolle</title>
+    <title>AR Brille - Finale Steuerung</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
+      // Die komplette Steuerung sauber verpackt
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
           const controller = this.el;
           const target = document.querySelector('#parent-container');
-          
-          // Holt sich die 3D-Welt, um das Objekt später wieder darin abzulegen
           const scene = document.querySelector('a-scene').object3D;
           let isGrabbed = false;
 
-          // 1. GREIFEN & BEWEGEN (Trigger-Taste drücken)
+          // 1. GREIFEN (Trigger drücken)
           controller.addEventListener('triggerdown', () => {
             const hits = controller.components.raycaster.intersections;
-            // Wenn der gelbe Laser das Modell trifft...
             if (hits.length > 0) {
               isGrabbed = true;
-              // ...kleben wir das Objekt an den Controller (attach verhindert, dass es wegspringt)
               controller.object3D.attach(target.object3D);
             }
           });
 
-          // 2. LOSLASSEN (Trigger-Taste loslassen)
+          // 2. LOSLASSEN (Trigger loslassen)
           controller.addEventListener('triggerup', () => {
             if (isGrabbed) {
               isGrabbed = false;
-              // Wir lösen das Objekt vom Controller und legen es fest in den Raum
               scene.attach(target.object3D);
             }
           });
 
-// 3. ZOOMEN & DREHEN (Joystick bewegen)
+          // 3. ZOOMEN & DREHEN (Joystick)
           controller.addEventListener('thumbstickmoved', (evt) => {
-            // evt.detail.x = links/rechts | evt.detail.y = hoch/runter
-            
-            // DREHEN (sanfter gemacht)
+            // Drehen: Links / Rechts
             if (evt.detail.x > 0.2) { target.object3D.rotation.y += 0.03; }
             if (evt.detail.x < -0.2) { target.object3D.rotation.y -= 0.03; }
 
-            // ZOOMEN (Skalieren - Geschwindigkeit gedrosselt für mehr Kontrolle)
-            const scale = target.object3D.scale.x;
+            // Zoomen: Vor / Zurück (Soft und logisch)
+            const currentScale = target.object3D.scale.x;
             
-            // Joystick nach OBEN drücken (y ist negativ) -> Größer machen (Zoom IN)
             if (evt.detail.y < -0.2) { 
-              target.object3D.scale.set(scale * 1.02, scale * 1.02, scale * 1.02);
+              // Joystick nach vorne = 2% größer machen
+              target.object3D.scale.set(currentScale * 1.02, currentScale * 1.02, currentScale * 1.02);
             }
-            // Joystick nach UNTEN ziehen (y ist positiv) -> Kleiner machen (Zoom OUT)
             if (evt.detail.y > 0.2) { 
-              target.object3D.scale.set(scale * 0.98, scale * 0.98, scale * 0.98);
+              // Joystick nach hinten = 2% kleiner machen
+              target.object3D.scale.set(currentScale * 0.98, currentScale * 0.98, currentScale * 0.98);
             }
           });
+        }
+      });
     </script>
   </head>
   <body>
@@ -65,12 +61,14 @@
       </a-assets>
 
       <a-entity id="parent-container" position="0 1.2 -1">
+          
           <a-entity 
             id="modell-objekt"
             gltf-model="#meinModell" 
             class="clickable"
             scale="1 1 1">
           </a-entity>
+
       </a-entity>
 
       <a-entity id="hand" oculus-touch-controls="hand: right" 
