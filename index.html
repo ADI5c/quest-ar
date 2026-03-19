@@ -1,225 +1,100 @@
 <!DOCTYPE html>
-<html lang="de">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Meta Quest AR Viewer – GLB mit echtem Passthrough</title>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>AR Brille - Finale Steuerung</title>
+    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
-  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script>
+      AFRAME.registerComponent('ar-steuerung', {
+        init: function () {
+          const controller = this.el;
+          const target = document.querySelector('#parent-container');
+          const scene = document.querySelector('a-scene').object3D;
+          const camera = document.querySelector('a-camera');
+          let isGrabbed = false;
 
-  <script>
-    AFRAME.registerComponent('ar-steuerung', {
-      schema: {
-        target: { type: 'selector' },
-        deadzone: { type: 'number', default: 0.18 },
-        rotateSpeed: { type: 'number', default: 2.0 },     // rad/s
-        moveSpeed: { type: 'number', default: 0.8 },       // m/s
-        scaleSpeed: { type: 'number', default: 0.8 },
-        minScale: { type: 'number', default: 0.03 },
-        maxScale: { type: 'number', default: 2.5 }
-      },
+          const minDistance = 0.25;
+          const maxDistance = 4.0;
+          const moveStep = 0.05;
 
-      init: function () {
-        this.controller = this.el;
-        this.sceneEl = this.el.sceneEl;
-        this.sceneObj = this.sceneEl.object3D;
-        this.cameraEl = this.sceneEl.camera && this.sceneEl.camera.el
-          ? this.sceneEl.camera.el
-          : document.querySelector('[camera]');
+          const dir = new THREE.Vector3();
+          const targetWorldPos = new THREE.Vector3();
+          const cameraWorldPos = new THREE.Vector3();
 
-        this.targetEl = this.data.target;
-        this.targetObj = this.targetEl ? this.targetEl.object3D : null;
-
-        this.isGrabbed = false;
-        this.stickX = 0;
-        this.stickY = 0;
-        this.scaleDir = 0;
-
-        this.tmpDir = new THREE.Vector3();
-        this.tmpPos = new THREE.Vector3();
-
-        this.onTriggerDown = this.onTriggerDown.bind(this);
-        this.onTriggerUp = this.onTriggerUp.bind(this);
-        this.onThumbstickMoved = this.onThumbstickMoved.bind(this);
-        this.onThumbstickStop = this.onThumbstickStop.bind(this);
-        this.onGripDown = this.onGripDown.bind(this);
-        this.onGripUp = this.onGripUp.bind(this);
-        this.onXDown = this.onXDown.bind(this);
-        this.onXUp = this.onXUp.bind(this);
-
-        this.controller.addEventListener('triggerdown', this.onTriggerDown);
-        this.controller.addEventListener('triggerup', this.onTriggerUp);
-        this.controller.addEventListener('thumbstickmoved', this.onThumbstickMoved);
-        this.controller.addEventListener('thumbstickup', this.onThumbstickStop);
-        this.controller.addEventListener('thumbstickdown', this.onThumbstickStop);
-
-        // Grip = größer
-        this.controller.addEventListener('gripdown', this.onGripDown);
-        this.controller.addEventListener('gripup', this.onGripUp);
-
-        // X-Button / A-Button = kleiner
-        this.controller.addEventListener('xbuttondown', this.onXDown);
-        this.controller.addEventListener('xbuttonup', this.onXUp);
-        this.controller.addEventListener('abuttondown', this.onXDown);
-        this.controller.addEventListener('abuttonup', this.onXUp);
-
-        // Optional: automatisch AR starten, wenn unterstützt
-        this.sceneEl.addEventListener('loaded', async () => {
-          if (this.sceneEl.is('ar-mode') || !navigator.xr) return;
-
-          try {
-            const supported = await navigator.xr.isSessionSupported('immersive-ar');
-            if (supported && this.sceneEl.enterAR) {
-              await this.sceneEl.enterAR();
+          controller.addEventListener('triggerdown', () => {
+            const hits = controller.components.raycaster.intersections;
+            if (hits.length > 0) {
+              isGrabbed = true;
+              controller.object3D.attach(target.object3D);
             }
-          } catch (e) {
-            console.warn('AR konnte nicht automatisch gestartet werden:', e);
-          }
-        });
-      },
+          });
 
-      remove: function () {
-        this.controller.removeEventListener('triggerdown', this.onTriggerDown);
-        this.controller.removeEventListener('triggerup', this.onTriggerUp);
-        this.controller.removeEventListener('thumbstickmoved', this.onThumbstickMoved);
-        this.controller.removeEventListener('thumbstickup', this.onThumbstickStop);
-        this.controller.removeEventListener('thumbstickdown', this.onThumbstickStop);
-        this.controller.removeEventListener('gripdown', this.onGripDown);
-        this.controller.removeEventListener('gripup', this.onGripUp);
-        this.controller.removeEventListener('xbuttondown', this.onXDown);
-        this.controller.removeEventListener('xbuttonup', this.onXUp);
-        this.controller.removeEventListener('abuttondown', this.onXDown);
-        this.controller.removeEventListener('abuttonup', this.onXUp);
-      },
+          controller.addEventListener('triggerup', () => {
+            if (isGrabbed) {
+              isGrabbed = false;
+              scene.attach(target.object3D);
+            }
+          });
 
-      onTriggerDown: function () {
-        if (!this.targetEl) return;
+          controller.addEventListener('thumbstickmoved', (evt) => {
+            if (isGrabbed) return;
 
-        const raycaster = this.controller.components.raycaster;
-        if (!raycaster || !raycaster.intersections || raycaster.intersections.length === 0) return;
+            // Rotation
+            if (evt.detail.x > 0.2) target.object3D.rotation.y += 0.03;
+            if (evt.detail.x < -0.2) target.object3D.rotation.y -= 0.03;
 
-        const hit = raycaster.intersections[0];
-        if (!hit || !hit.object || !hit.object.el) return;
+            // Distanz Kamera <-> Objekt
+            camera.object3D.getWorldPosition(cameraWorldPos);
+            target.object3D.getWorldPosition(targetWorldPos);
 
-        const hitEl = hit.object.el;
-        const isTargetHit =
-          hitEl === this.targetEl ||
-          this.targetEl.contains(hitEl) ||
-          (hitEl.closest && this.targetEl.id && hitEl.closest('#' + this.targetEl.id));
+            dir.subVectors(targetWorldPos, cameraWorldPos);
+            let distance = dir.length();
+            if (distance === 0) return;
 
-        if (!isTargetHit) return;
+            dir.normalize();
 
-        this.isGrabbed = true;
-        this.controller.object3D.attach(this.targetObj);
-      },
+            // Stick zu dir => näher
+            if (evt.detail.y > 0.2) {
+              distance = Math.max(minDistance, distance - moveStep);
+              target.object3D.position.copy(camera.object3D.position).add(dir.multiplyScalar(distance));
+            }
 
-      onTriggerUp: function () {
-        if (!this.isGrabbed || !this.targetObj) return;
-        this.isGrabbed = false;
-        this.sceneObj.attach(this.targetObj);
-      },
-
-      onThumbstickMoved: function (evt) {
-        const x = evt.detail.x || 0;
-        const y = evt.detail.y || 0;
-
-        this.stickX = Math.abs(x) > this.data.deadzone ? x : 0;
-        this.stickY = Math.abs(y) > this.data.deadzone ? y : 0;
-      },
-
-      onThumbstickStop: function () {
-        this.stickX = 0;
-        this.stickY = 0;
-      },
-
-      onGripDown: function () {
-        this.scaleDir = 1;
-      },
-
-      onGripUp: function () {
-        if (this.scaleDir === 1) this.scaleDir = 0;
-      },
-
-      onXDown: function () {
-        this.scaleDir = -1;
-      },
-
-      onXUp: function () {
-        if (this.scaleDir === -1) this.scaleDir = 0;
-      },
-
-      tick: function (time, deltaMs) {
-        if (!this.targetObj) return;
-
-        const dt = Math.min(deltaMs / 1000, 0.05);
-
-        // Links/Rechts drehen
-        if (this.stickX !== 0) {
-          this.targetObj.rotation.y -= this.stickX * this.data.rotateSpeed * dt;
+            // Stick von dir weg => weiter weg
+            if (evt.detail.y < -0.2) {
+              distance = Math.min(maxDistance, distance + moveStep);
+              target.object3D.position.copy(camera.object3D.position).add(dir.multiplyScalar(distance));
+            }
+          });
         }
+      });
+    </script>
+  </head>
+  <body>
+    <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
+      <a-assets>
+        <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
+      </a-assets>
 
-        // Vor/Zurück = Position ändern, NICHT skalieren
-        if (this.stickY !== 0 && this.cameraEl) {
-          this.cameraEl.object3D.getWorldDirection(this.tmpDir);
-
-          // Kamera schaut nach vorne -> bei "zu mir ziehen" (stickY > 0)
-          // soll das Objekt zur Kamera kommen, also entlang -forward verschieben
-          const moveAmount = this.stickY * this.data.moveSpeed * dt;
-
-          this.targetObj.position.addScaledVector(this.tmpDir, -moveAmount);
-        }
-
-        // Skalieren nur über Buttons
-        if (this.scaleDir !== 0) {
-          const s = this.targetObj.scale.x;
-          let next = s * (1 + this.scaleDir * this.data.scaleSpeed * dt);
-          next = THREE.MathUtils.clamp(next, this.data.minScale, this.data.maxScale);
-          this.targetObj.scale.set(next, next, next);
-        }
-      }
-    });
-  </script>
-</head>
-<body>
-  <a-scene
-    webxr="requiredFeatures: local-floor; optionalFeatures: hit-test;"
-    xr-mode-ui="enabled: true"
-    renderer="colorManagement: true; antialias: true; alpha: true"
-    background="transparent: true"
-  >
-    <a-assets timeout="15000">
-      <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
-    </a-assets>
-
-    <a-entity id="parent-container" position="0 1.2 -1">
-      <!-- Unsichtbarer Collider für zuverlässiges Greifen -->
-      <a-box
-        class="clickable"
-        visible="false"
-        width="0.45"
-        height="0.25"
-        depth="0.25">
-      </a-box>
-
-      <a-entity
-        id="modell-objekt"
-        gltf-model="#meinModell"
-        scale="0.1 0.1 0.1">
+      <a-entity id="parent-container" position="0 1.2 -1">
+        <a-entity 
+          id="modell-objekt"
+          gltf-model="#meinModell" 
+          class="clickable"
+          scale="0.1 0.1 0.1">
+        </a-entity>
       </a-entity>
-    </a-entity>
 
-    <a-entity
-      id="rightHand"
-      oculus-touch-controls="hand: right"
-      raycaster="objects: .clickable; showLine: true; far: 20"
-      line="color: yellow; opacity: 0.9"
-      ar-steuerung="target: #parent-container"
-    ></a-entity>
+      <a-entity id="hand"
+                oculus-touch-controls="hand: right"
+                raycaster="objects: .clickable; showLine: true; far: 100"
+                line="color: yellow; opacity: 1"
+                ar-steuerung>
+      </a-entity>
 
-    <a-light type="ambient" intensity="1.4"></a-light>
-    <a-light type="directional" position="1 2 1" intensity="1"></a-light>
-
-    <a-camera position="0 1.6 0"></a-camera>
-  </a-scene>
-</body>
+      <a-light type="ambient" intensity="1.5"></a-light>
+      <a-light type="directional" position="1 2 1" intensity="1"></a-light>
+      <a-camera position="0 1.6 0"></a-camera>
+    </a-scene>
+  </body>
 </html>
