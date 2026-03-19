@@ -2,66 +2,70 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Steuerung fix</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.2.0/dist/aframe-extras.min.js"></script>
   </head>
   <body>
-    <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
+    <a-scene xr-mode-ui="XRMode: ar" raycaster="objects: .clickable">
       
       <a-assets>
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
-      <a-entity id="anchor" position="0 1.2 -0.5">
+      <a-entity id="parent-container" position="0 1.2 -1">
           <a-entity 
-            id="modell-instanz"
+            id="modell-objekt"
             gltf-model="#meinModell" 
-            scale="0.2 0.2 0.2" 
             class="clickable"
-            position="0 0 0"> 
+            scale="1 1 1">
           </a-entity>
       </a-entity>
 
-      <a-entity id="rightHand" oculus-touch-controls="hand: right" 
-                raycaster="objects: .clickable; showLine: true; far: 10"
-                line="color: cyan; opacity: 0.7">
+      <a-entity id="hand" oculus-touch-controls="hand: right" 
+                raycaster="objects: .clickable; showLine: true; far: 100"
+                line="color: yellow; opacity: 1">
       </a-entity>
 
-      <a-light type="ambient" intensity="1.5"></a-light>
-      <a-light type="directional" position="1 2 1" intensity="1"></a-light>
+      <a-light type="ambient" intensity="2"></a-light>
+      <a-light type="directional" position="1 2 1"></a-light>
       <a-camera position="0 1.6 0"></a-camera>
 
     </a-scene>
 
     <script>
-      const modelAnchor = document.querySelector('#anchor');
-      const rightHand = document.querySelector('#rightHand');
-      let isGrabbed = false;
+      const model = document.querySelector('#modell-objekt');
+      const container = document.querySelector('#parent-container');
+      const hand = document.querySelector('#hand');
 
-      // Wenn der Strahl das Modell trifft und man den Trigger drückt
-      rightHand.addEventListener('triggerdown', function () {
-        const intersections = rightHand.components.raycaster.intersections;
-        if (intersections.length > 0) {
-          isGrabbed = true;
-          // Das Modell "klebt" jetzt am Controller
-          modelAnchor.setAttribute('position', '0 0 -0.3'); 
-          rightHand.appendChild(modelAnchor); 
-          console.log("Objekt gegriffen!");
-        }
+      // MAGIC FIX: Sobald das Modell geladen ist, zentrieren wir es
+      model.addEventListener('model-loaded', () => {
+        const mesh = model.getObject3D('mesh');
+        const box = new THREE.Box3().setFromObject(mesh);
+        const center = new THREE.Vector3();
+        box.getCenter(center);
+        
+        // Wir schieben das Modell intern so weit zurück, dass die Mitte bei 0,0,0 ist
+        model.object3D.position.set(-center.x, -center.y, -center.z);
+        
+        // Automatische Größenanpassung: Wenn das Modell riesig ist, wird es geschrumpft
+        const size = box.getSize(new THREE.Vector3()).length();
+        const scaleFactor = 0.5 / size; // Wir machen es ca. 50cm groß
+        model.setAttribute('scale', `${scaleFactor} ${scaleFactor} ${scaleFactor}`);
+        
+        console.log("Modell zentriert und skaliert!");
       });
 
-      // Wenn man den Trigger loslässt, bleibt es im Raum stehen
-      rightHand.addEventListener('triggerup', function () {
-        if (isGrabbed) {
-          isGrabbed = false;
-          // Wir lösen es vom Controller und lassen es in der Welt
-          const worldPos = new THREE.Vector3();
-          modelAnchor.object3D.getWorldPosition(worldPos);
-          
-          document.querySelector('a-scene').appendChild(modelAnchor);
-          modelAnchor.setAttribute('position', worldPos);
-          console.log("Objekt losgelassen!");
+      // Interaktion: Klick mit dem Trigger verschiebt das Modell zu dir
+      hand.addEventListener('triggerdown', () => {
+        const intersections = hand.components.raycaster.intersections;
+        if (intersections.length > 0) {
+            // Wenn du es triffst, springt es direkt zu deinem Controller
+            container.setAttribute('position', '0 0 -0.5');
+            hand.appendChild(container);
+            console.log("Gegriffen!");
+        } else {
+            // Falls der Strahl nichts trifft: Modell vor die Kamera resetten
+            container.setAttribute('position', '0 1.2 -1');
+            document.querySelector('a-scene').appendChild(container);
         }
       });
     </script>
