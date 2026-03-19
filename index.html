@@ -35,27 +35,26 @@
             }
           });
 
-          // 3. ZOOMEN & DREHEN (Joystick bewegen)
+// 3. ZOOMEN & DREHEN (Joystick bewegen)
           controller.addEventListener('thumbstickmoved', (evt) => {
             // evt.detail.x = links/rechts | evt.detail.y = hoch/runter
             
-            // DREHEN
-            if (evt.detail.x > 0.5) { target.object3D.rotation.y += 0.05; }
-            if (evt.detail.x < -0.5) { target.object3D.rotation.y -= 0.05; }
+            // DREHEN (sanfter gemacht)
+            if (evt.detail.x > 0.2) { target.object3D.rotation.y += 0.03; }
+            if (evt.detail.x < -0.2) { target.object3D.rotation.y -= 0.03; }
 
-            // ZOOMEN (Skalieren)
+            // ZOOMEN (Skalieren - Geschwindigkeit gedrosselt für mehr Kontrolle)
             const scale = target.object3D.scale.x;
-            if (evt.detail.y < -0.5) { 
-              // Joystick nach oben = 5% größer machen
-              target.object3D.scale.set(scale * 1.05, scale * 1.05, scale * 1.05);
+            
+            // Joystick nach OBEN drücken (y ist negativ) -> Größer machen (Zoom IN)
+            if (evt.detail.y < -0.2) { 
+              target.object3D.scale.set(scale * 1.02, scale * 1.02, scale * 1.02);
             }
-            if (evt.detail.y > 0.5) { 
-              // Joystick nach unten = 5% kleiner machen
-              target.object3D.scale.set(scale * 0.95, scale * 0.95, scale * 0.95);
+            // Joystick nach UNTEN ziehen (y ist positiv) -> Kleiner machen (Zoom OUT)
+            if (evt.detail.y > 0.2) { 
+              target.object3D.scale.set(scale * 0.98, scale * 0.98, scale * 0.98);
             }
           });
-        }
-      });
     </script>
   </head>
   <body>
