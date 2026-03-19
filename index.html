@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Meta Quest AR Viewer – GLB Steuerung</title>
+  <title>Meta Quest AR Viewer – GLB mit echtem Passthrough</title>
 
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
@@ -11,47 +11,85 @@
     AFRAME.registerComponent('ar-steuerung', {
       schema: {
         target: { type: 'selector' },
-        deadzone: { type: 'number', default: 0.2 },
-        rotateSpeed: { type: 'number', default: 1.8 },   // rad/s
-        scaleSpeed: { type: 'number', default: 0.9 },    // pro Sekunde
+        deadzone: { type: 'number', default: 0.18 },
+        rotateSpeed: { type: 'number', default: 2.0 },     // rad/s
+        moveSpeed: { type: 'number', default: 0.8 },       // m/s
+        scaleSpeed: { type: 'number', default: 0.8 },
         minScale: { type: 'number', default: 0.03 },
-        maxScale: { type: 'number', default: 3.0 }
+        maxScale: { type: 'number', default: 2.5 }
       },
 
       init: function () {
+        this.controller = this.el;
+        this.sceneEl = this.el.sceneEl;
+        this.sceneObj = this.sceneEl.object3D;
+        this.cameraEl = this.sceneEl.camera && this.sceneEl.camera.el
+          ? this.sceneEl.camera.el
+          : document.querySelector('[camera]');
+
+        this.targetEl = this.data.target;
+        this.targetObj = this.targetEl ? this.targetEl.object3D : null;
+
         this.isGrabbed = false;
         this.stickX = 0;
         this.stickY = 0;
+        this.scaleDir = 0;
 
-        this.controller = this.el;
-        this.sceneObj = this.el.sceneEl.object3D;
-        this.targetEl = this.data.target;
-
-        if (!this.targetEl) {
-          console.warn('[ar-steuerung] Kein target definiert.');
-          return;
-        }
-
-        this.targetObj = this.targetEl.object3D;
+        this.tmpDir = new THREE.Vector3();
+        this.tmpPos = new THREE.Vector3();
 
         this.onTriggerDown = this.onTriggerDown.bind(this);
         this.onTriggerUp = this.onTriggerUp.bind(this);
         this.onThumbstickMoved = this.onThumbstickMoved.bind(this);
-        this.onThumbstickEnd = this.onThumbstickEnd.bind(this);
+        this.onThumbstickStop = this.onThumbstickStop.bind(this);
+        this.onGripDown = this.onGripDown.bind(this);
+        this.onGripUp = this.onGripUp.bind(this);
+        this.onXDown = this.onXDown.bind(this);
+        this.onXUp = this.onXUp.bind(this);
 
         this.controller.addEventListener('triggerdown', this.onTriggerDown);
         this.controller.addEventListener('triggerup', this.onTriggerUp);
         this.controller.addEventListener('thumbstickmoved', this.onThumbstickMoved);
-        this.controller.addEventListener('thumbstickup', this.onThumbstickEnd);
-        this.controller.addEventListener('thumbstickdown', this.onThumbstickEnd);
+        this.controller.addEventListener('thumbstickup', this.onThumbstickStop);
+        this.controller.addEventListener('thumbstickdown', this.onThumbstickStop);
+
+        // Grip = größer
+        this.controller.addEventListener('gripdown', this.onGripDown);
+        this.controller.addEventListener('gripup', this.onGripUp);
+
+        // X-Button / A-Button = kleiner
+        this.controller.addEventListener('xbuttondown', this.onXDown);
+        this.controller.addEventListener('xbuttonup', this.onXUp);
+        this.controller.addEventListener('abuttondown', this.onXDown);
+        this.controller.addEventListener('abuttonup', this.onXUp);
+
+        // Optional: automatisch AR starten, wenn unterstützt
+        this.sceneEl.addEventListener('loaded', async () => {
+          if (this.sceneEl.is('ar-mode') || !navigator.xr) return;
+
+          try {
+            const supported = await navigator.xr.isSessionSupported('immersive-ar');
+            if (supported && this.sceneEl.enterAR) {
+              await this.sceneEl.enterAR();
+            }
+          } catch (e) {
+            console.warn('AR konnte nicht automatisch gestartet werden:', e);
+          }
+        });
       },
 
       remove: function () {
         this.controller.removeEventListener('triggerdown', this.onTriggerDown);
         this.controller.removeEventListener('triggerup', this.onTriggerUp);
         this.controller.removeEventListener('thumbstickmoved', this.onThumbstickMoved);
-        this.controller.removeEventListener('thumbstickup', this.onThumbstickEnd);
-        this.controller.removeEventListener('thumbstickdown', this.onThumbstickEnd);
+        this.controller.removeEventListener('thumbstickup', this.onThumbstickStop);
+        this.controller.removeEventListener('thumbstickdown', this.onThumbstickStop);
+        this.controller.removeEventListener('gripdown', this.onGripDown);
+        this.controller.removeEventListener('gripup', this.onGripUp);
+        this.controller.removeEventListener('xbuttondown', this.onXDown);
+        this.controller.removeEventListener('xbuttonup', this.onXUp);
+        this.controller.removeEventListener('abuttondown', this.onXDown);
+        this.controller.removeEventListener('abuttonup', this.onXUp);
       },
 
       onTriggerDown: function () {
@@ -61,16 +99,13 @@
         if (!raycaster || !raycaster.intersections || raycaster.intersections.length === 0) return;
 
         const hit = raycaster.intersections[0];
-        if (!hit || !hit.object) return;
+        if (!hit || !hit.object || !hit.object.el) return;
 
         const hitEl = hit.object.el;
-        if (!hitEl) return;
-
-        // Nur greifen, wenn direkt das Modell oder ein Kind davon getroffen wurde
         const isTargetHit =
           hitEl === this.targetEl ||
           this.targetEl.contains(hitEl) ||
-          hitEl.closest && hitEl.closest('#' + this.targetEl.id);
+          (hitEl.closest && this.targetEl.id && hitEl.closest('#' + this.targetEl.id));
 
         if (!isTargetHit) return;
 
@@ -80,7 +115,6 @@
 
       onTriggerUp: function () {
         if (!this.isGrabbed || !this.targetObj) return;
-
         this.isGrabbed = false;
         this.sceneObj.attach(this.targetObj);
       },
@@ -93,9 +127,25 @@
         this.stickY = Math.abs(y) > this.data.deadzone ? y : 0;
       },
 
-      onThumbstickEnd: function () {
+      onThumbstickStop: function () {
         this.stickX = 0;
         this.stickY = 0;
+      },
+
+      onGripDown: function () {
+        this.scaleDir = 1;
+      },
+
+      onGripUp: function () {
+        if (this.scaleDir === 1) this.scaleDir = 0;
+      },
+
+      onXDown: function () {
+        this.scaleDir = -1;
+      },
+
+      onXUp: function () {
+        if (this.scaleDir === -1) this.scaleDir = 0;
       },
 
       tick: function (time, deltaMs) {
@@ -103,26 +153,28 @@
 
         const dt = Math.min(deltaMs / 1000, 0.05);
 
-        // Rotation links / rechts
+        // Links/Rechts drehen
         if (this.stickX !== 0) {
           this.targetObj.rotation.y -= this.stickX * this.data.rotateSpeed * dt;
         }
 
-        // Skalierung vor / zurück
-        if (this.stickY !== 0) {
-          const currentScale = this.targetObj.scale.x;
+        // Vor/Zurück = Position ändern, NICHT skalieren
+        if (this.stickY !== 0 && this.cameraEl) {
+          this.cameraEl.object3D.getWorldDirection(this.tmpDir);
 
-          // Stick nach vorne (negativ) = größer
-          const direction = -this.stickY;
-          let nextScale = currentScale * (1 + direction * this.data.scaleSpeed * dt);
+          // Kamera schaut nach vorne -> bei "zu mir ziehen" (stickY > 0)
+          // soll das Objekt zur Kamera kommen, also entlang -forward verschieben
+          const moveAmount = this.stickY * this.data.moveSpeed * dt;
 
-          nextScale = THREE.MathUtils.clamp(
-            nextScale,
-            this.data.minScale,
-            this.data.maxScale
-          );
+          this.targetObj.position.addScaledVector(this.tmpDir, -moveAmount);
+        }
 
-          this.targetObj.scale.set(nextScale, nextScale, nextScale);
+        // Skalieren nur über Buttons
+        if (this.scaleDir !== 0) {
+          const s = this.targetObj.scale.x;
+          let next = s * (1 + this.scaleDir * this.data.scaleSpeed * dt);
+          next = THREE.MathUtils.clamp(next, this.data.minScale, this.data.maxScale);
+          this.targetObj.scale.set(next, next, next);
         }
       }
     });
@@ -130,38 +182,43 @@
 </head>
 <body>
   <a-scene
-    renderer="colorManagement: true; antialias: true"
+    webxr="requiredFeatures: local-floor; optionalFeatures: hit-test;"
     xr-mode-ui="enabled: true"
-    background="color: #ECECEC"
+    renderer="colorManagement: true; antialias: true; alpha: true"
+    background="transparent: true"
   >
     <a-assets timeout="15000">
       <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
     </a-assets>
 
-    <!-- Container fürs gesamte Modell -->
-    <a-entity id="parent-container" position="0 1.2 -1" rotation="0 0 0">
+    <a-entity id="parent-container" position="0 1.2 -1">
+      <!-- Unsichtbarer Collider für zuverlässiges Greifen -->
+      <a-box
+        class="clickable"
+        visible="false"
+        width="0.45"
+        height="0.25"
+        depth="0.25">
+      </a-box>
+
       <a-entity
         id="modell-objekt"
         gltf-model="#meinModell"
-        class="clickable"
-        scale="0.1 0.1 0.1"
-      ></a-entity>
+        scale="0.1 0.1 0.1">
+      </a-entity>
     </a-entity>
 
-    <!-- Controller -->
     <a-entity
-      id="hand"
+      id="rightHand"
       oculus-touch-controls="hand: right"
       raycaster="objects: .clickable; showLine: true; far: 20"
       line="color: yellow; opacity: 0.9"
-      ar-steuerung="target: #parent-container; deadzone: 0.18; rotateSpeed: 2.0; scaleSpeed: 1.2; minScale: 0.03; maxScale: 2.5"
+      ar-steuerung="target: #parent-container"
     ></a-entity>
 
-    <!-- Licht -->
     <a-light type="ambient" intensity="1.4"></a-light>
     <a-light type="directional" position="1 2 1" intensity="1"></a-light>
 
-    <!-- Kamera -->
     <a-camera position="0 1.6 0"></a-camera>
   </a-scene>
 </body>
