@@ -1,86 +1,168 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>AR Brille - Finale Steuerung</title>
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Meta Quest AR Viewer – GLB Steuerung</title>
 
-    <script>
-      // Die komplette Steuerung sauber verpackt
-      AFRAME.registerComponent('ar-steuerung', {
-        init: function () {
-          const controller = this.el;
-          const target = document.querySelector('#parent-container');
-          const scene = document.querySelector('a-scene').object3D;
-          let isGrabbed = false;
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
-          // 1. GREIFEN (Trigger drücken)
-          controller.addEventListener('triggerdown', () => {
-            const hits = controller.components.raycaster.intersections;
-            if (hits.length > 0) {
-              isGrabbed = true;
-              controller.object3D.attach(target.object3D);
-            }
-          });
+  <script>
+    AFRAME.registerComponent('ar-steuerung', {
+      schema: {
+        target: { type: 'selector' },
+        deadzone: { type: 'number', default: 0.2 },
+        rotateSpeed: { type: 'number', default: 1.8 },   // rad/s
+        scaleSpeed: { type: 'number', default: 0.9 },    // pro Sekunde
+        minScale: { type: 'number', default: 0.03 },
+        maxScale: { type: 'number', default: 3.0 }
+      },
 
-          // 2. LOSLASSEN (Trigger loslassen)
-          controller.addEventListener('triggerup', () => {
-            if (isGrabbed) {
-              isGrabbed = false;
-              scene.attach(target.object3D);
-            }
-          });
+      init: function () {
+        this.isGrabbed = false;
+        this.stickX = 0;
+        this.stickY = 0;
 
-          // 3. ZOOMEN & DREHEN (Joystick)
-          controller.addEventListener('thumbstickmoved', (evt) => {
-            // Drehen: Links / Rechts
-            if (evt.detail.x > 0.2) { target.object3D.rotation.y += 0.03; }
-            if (evt.detail.x < -0.2) { target.object3D.rotation.y -= 0.03; }
+        this.controller = this.el;
+        this.sceneObj = this.el.sceneEl.object3D;
+        this.targetEl = this.data.target;
 
-            // Zoomen: Vor / Zurück (Soft und logisch)
-            const currentScale = target.object3D.scale.x;
-            
-            if (evt.detail.y < -0.2) { 
-              // Joystick nach vorne = 2% größer machen
-              target.object3D.scale.set(currentScale * 1.02, currentScale * 1.02, currentScale * 1.02);
-            }
-            if (evt.detail.y > 0.2) { 
-              // Joystick nach hinten = 2% kleiner machen
-              target.object3D.scale.set(currentScale * 0.98, currentScale * 0.98, currentScale * 0.98);
-            }
-          });
+        if (!this.targetEl) {
+          console.warn('[ar-steuerung] Kein target definiert.');
+          return;
         }
-      });
-    </script>
-  </head>
-  <body>
-    <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
-      
-      <a-assets>
-        <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
-      </a-assets>
 
-      <a-entity id="parent-container" position="0 1.2 -1">
-          
-          <a-entity 
-            id="modell-objekt"
-            gltf-model="#meinModell" 
-            class="clickable"
-            scale="0.1 0.1 0.1">
-          </a-entity>
+        this.targetObj = this.targetEl.object3D;
 
-      </a-entity>
+        this.onTriggerDown = this.onTriggerDown.bind(this);
+        this.onTriggerUp = this.onTriggerUp.bind(this);
+        this.onThumbstickMoved = this.onThumbstickMoved.bind(this);
+        this.onThumbstickEnd = this.onThumbstickEnd.bind(this);
 
-      <a-entity id="hand" oculus-touch-controls="hand: right" 
-                raycaster="objects: .clickable; showLine: true; far: 100"
-                line="color: yellow; opacity: 1"
-                ar-steuerung>
-      </a-entity>
+        this.controller.addEventListener('triggerdown', this.onTriggerDown);
+        this.controller.addEventListener('triggerup', this.onTriggerUp);
+        this.controller.addEventListener('thumbstickmoved', this.onThumbstickMoved);
+        this.controller.addEventListener('thumbstickup', this.onThumbstickEnd);
+        this.controller.addEventListener('thumbstickdown', this.onThumbstickEnd);
+      },
 
-      <a-light type="ambient" intensity="1.5"></a-light>
-      <a-light type="directional" position="1 2 1" intensity="1"></a-light>
-      <a-camera position="0 1.6 0"></a-camera>
+      remove: function () {
+        this.controller.removeEventListener('triggerdown', this.onTriggerDown);
+        this.controller.removeEventListener('triggerup', this.onTriggerUp);
+        this.controller.removeEventListener('thumbstickmoved', this.onThumbstickMoved);
+        this.controller.removeEventListener('thumbstickup', this.onThumbstickEnd);
+        this.controller.removeEventListener('thumbstickdown', this.onThumbstickEnd);
+      },
 
-    </a-scene>
-  </body>
+      onTriggerDown: function () {
+        if (!this.targetEl) return;
+
+        const raycaster = this.controller.components.raycaster;
+        if (!raycaster || !raycaster.intersections || raycaster.intersections.length === 0) return;
+
+        const hit = raycaster.intersections[0];
+        if (!hit || !hit.object) return;
+
+        const hitEl = hit.object.el;
+        if (!hitEl) return;
+
+        // Nur greifen, wenn direkt das Modell oder ein Kind davon getroffen wurde
+        const isTargetHit =
+          hitEl === this.targetEl ||
+          this.targetEl.contains(hitEl) ||
+          hitEl.closest && hitEl.closest('#' + this.targetEl.id);
+
+        if (!isTargetHit) return;
+
+        this.isGrabbed = true;
+        this.controller.object3D.attach(this.targetObj);
+      },
+
+      onTriggerUp: function () {
+        if (!this.isGrabbed || !this.targetObj) return;
+
+        this.isGrabbed = false;
+        this.sceneObj.attach(this.targetObj);
+      },
+
+      onThumbstickMoved: function (evt) {
+        const x = evt.detail.x || 0;
+        const y = evt.detail.y || 0;
+
+        this.stickX = Math.abs(x) > this.data.deadzone ? x : 0;
+        this.stickY = Math.abs(y) > this.data.deadzone ? y : 0;
+      },
+
+      onThumbstickEnd: function () {
+        this.stickX = 0;
+        this.stickY = 0;
+      },
+
+      tick: function (time, deltaMs) {
+        if (!this.targetObj) return;
+
+        const dt = Math.min(deltaMs / 1000, 0.05);
+
+        // Rotation links / rechts
+        if (this.stickX !== 0) {
+          this.targetObj.rotation.y -= this.stickX * this.data.rotateSpeed * dt;
+        }
+
+        // Skalierung vor / zurück
+        if (this.stickY !== 0) {
+          const currentScale = this.targetObj.scale.x;
+
+          // Stick nach vorne (negativ) = größer
+          const direction = -this.stickY;
+          let nextScale = currentScale * (1 + direction * this.data.scaleSpeed * dt);
+
+          nextScale = THREE.MathUtils.clamp(
+            nextScale,
+            this.data.minScale,
+            this.data.maxScale
+          );
+
+          this.targetObj.scale.set(nextScale, nextScale, nextScale);
+        }
+      }
+    });
+  </script>
+</head>
+<body>
+  <a-scene
+    renderer="colorManagement: true; antialias: true"
+    xr-mode-ui="enabled: true"
+    background="color: #ECECEC"
+  >
+    <a-assets timeout="15000">
+      <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
+    </a-assets>
+
+    <!-- Container fürs gesamte Modell -->
+    <a-entity id="parent-container" position="0 1.2 -1" rotation="0 0 0">
+      <a-entity
+        id="modell-objekt"
+        gltf-model="#meinModell"
+        class="clickable"
+        scale="0.1 0.1 0.1"
+      ></a-entity>
+    </a-entity>
+
+    <!-- Controller -->
+    <a-entity
+      id="hand"
+      oculus-touch-controls="hand: right"
+      raycaster="objects: .clickable; showLine: true; far: 20"
+      line="color: yellow; opacity: 0.9"
+      ar-steuerung="target: #parent-container; deadzone: 0.18; rotateSpeed: 2.0; scaleSpeed: 1.2; minScale: 0.03; maxScale: 2.5"
+    ></a-entity>
+
+    <!-- Licht -->
+    <a-light type="ambient" intensity="1.4"></a-light>
+    <a-light type="directional" position="1 2 1" intensity="1"></a-light>
+
+    <!-- Kamera -->
+    <a-camera position="0 1.6 0"></a-camera>
+  </a-scene>
+</body>
 </html>
