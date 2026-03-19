@@ -11,17 +11,13 @@
           const controller = this.el;
           const target = document.querySelector('#parent-container');
           const scene = document.querySelector('a-scene').object3D;
-          const camera = document.querySelector('a-camera');
           let isGrabbed = false;
 
-          const minDistance = 0.25;
-          const maxDistance = 4.0;
           const moveStep = 0.05;
+          const minZ = -5.0;   // weiter weg
+          const maxZ = -0.2;   // näher zur Kamera
 
-          const dir = new THREE.Vector3();
-          const targetWorldPos = new THREE.Vector3();
-          const cameraWorldPos = new THREE.Vector3();
-
+          // 1. GREIFEN
           controller.addEventListener('triggerdown', () => {
             const hits = controller.components.raycaster.intersections;
             if (hits.length > 0) {
@@ -30,6 +26,7 @@
             }
           });
 
+          // 2. LOSLASSEN
           controller.addEventListener('triggerup', () => {
             if (isGrabbed) {
               isGrabbed = false;
@@ -37,33 +34,33 @@
             }
           });
 
+          // 3. JOYSTICK
           controller.addEventListener('thumbstickmoved', (evt) => {
             if (isGrabbed) return;
 
-            // Rotation
-            if (evt.detail.x > 0.2) target.object3D.rotation.y += 0.03;
-            if (evt.detail.x < -0.2) target.object3D.rotation.y -= 0.03;
-
-            // Distanz Kamera <-> Objekt
-            camera.object3D.getWorldPosition(cameraWorldPos);
-            target.object3D.getWorldPosition(targetWorldPos);
-
-            dir.subVectors(targetWorldPos, cameraWorldPos);
-            let distance = dir.length();
-            if (distance === 0) return;
-
-            dir.normalize();
-
-            // Stick zu dir => näher
-            if (evt.detail.y > 0.2) {
-              distance = Math.max(minDistance, distance - moveStep);
-              target.object3D.position.copy(camera.object3D.position).add(dir.multiplyScalar(distance));
+            // Drehen links / rechts
+            if (evt.detail.x > 0.2) {
+              target.object3D.rotation.y += 0.03;
+            }
+            if (evt.detail.x < -0.2) {
+              target.object3D.rotation.y -= 0.03;
             }
 
-            // Stick von dir weg => weiter weg
+            // Zoom / Distanz
+            // Stick zu dir = näher
+            if (evt.detail.y > 0.2) {
+              target.object3D.position.z = Math.min(
+                maxZ,
+                target.object3D.position.z + moveStep
+              );
+            }
+
+            // Stick nach vorne = weiter weg
             if (evt.detail.y < -0.2) {
-              distance = Math.min(maxDistance, distance + moveStep);
-              target.object3D.position.copy(camera.object3D.position).add(dir.multiplyScalar(distance));
+              target.object3D.position.z = Math.max(
+                minZ,
+                target.object3D.position.z - moveStep
+              );
             }
           });
         }
