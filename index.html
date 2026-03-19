@@ -2,8 +2,61 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Fixes Modell</title>
+    <title>AR Brille - Volle Kontrolle</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
+    <script>
+      AFRAME.registerComponent('ar-steuerung', {
+        init: function () {
+          const controller = this.el;
+          const target = document.querySelector('#parent-container');
+          
+          // Holt sich die 3D-Welt, um das Objekt später wieder darin abzulegen
+          const scene = document.querySelector('a-scene').object3D;
+          let isGrabbed = false;
+
+          // 1. GREIFEN & BEWEGEN (Trigger-Taste drücken)
+          controller.addEventListener('triggerdown', () => {
+            const hits = controller.components.raycaster.intersections;
+            // Wenn der gelbe Laser das Modell trifft...
+            if (hits.length > 0) {
+              isGrabbed = true;
+              // ...kleben wir das Objekt an den Controller (attach verhindert, dass es wegspringt)
+              controller.object3D.attach(target.object3D);
+            }
+          });
+
+          // 2. LOSLASSEN (Trigger-Taste loslassen)
+          controller.addEventListener('triggerup', () => {
+            if (isGrabbed) {
+              isGrabbed = false;
+              // Wir lösen das Objekt vom Controller und legen es fest in den Raum
+              scene.attach(target.object3D);
+            }
+          });
+
+          // 3. ZOOMEN & DREHEN (Joystick bewegen)
+          controller.addEventListener('thumbstickmoved', (evt) => {
+            // evt.detail.x = links/rechts | evt.detail.y = hoch/runter
+            
+            // DREHEN
+            if (evt.detail.x > 0.5) { target.object3D.rotation.y += 0.05; }
+            if (evt.detail.x < -0.5) { target.object3D.rotation.y -= 0.05; }
+
+            // ZOOMEN (Skalieren)
+            const scale = target.object3D.scale.x;
+            if (evt.detail.y < -0.5) { 
+              // Joystick nach oben = 5% größer machen
+              target.object3D.scale.set(scale * 1.05, scale * 1.05, scale * 1.05);
+            }
+            if (evt.detail.y > 0.5) { 
+              // Joystick nach unten = 5% kleiner machen
+              target.object3D.scale.set(scale * 0.95, scale * 0.95, scale * 0.95);
+            }
+          });
+        }
+      });
+    </script>
   </head>
   <body>
     <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
@@ -13,62 +66,24 @@
       </a-assets>
 
       <a-entity id="parent-container" position="0 1.2 -1">
-          
           <a-entity 
             id="modell-objekt"
             gltf-model="#meinModell" 
             class="clickable"
             scale="1 1 1">
           </a-entity>
-          
       </a-entity>
 
       <a-entity id="hand" oculus-touch-controls="hand: right" 
                 raycaster="objects: .clickable; showLine: true; far: 100"
-                line="color: yellow; opacity: 1">
+                line="color: yellow; opacity: 1"
+                ar-steuerung>
       </a-entity>
 
       <a-light type="ambient" intensity="1.5"></a-light>
       <a-light type="directional" position="1 2 1" intensity="1"></a-light>
-      
       <a-camera position="0 1.6 0"></a-camera>
 
     </a-scene>
-
-    <script>
-      const model = document.querySelector('#modell-objekt');
-      const container = document.querySelector('#parent-container');
-      const hand = document.querySelector('#hand');
-
-      // 1. MODELL ZENTRIEREN (Aber Größe in Ruhe lassen!)
-      model.addEventListener('model-loaded', () => {
-        const mesh = model.getObject3D('mesh');
-        const box = new THREE.Box3().setFromObject(mesh);
-        const center = new THREE.Vector3();
-        box.getCenter(center);
-        
-        // Schiebt das Modell intern genau in die Mitte des Containers
-        model.object3D.position.set(-center.x, -center.y, -center.z);
-        console.log("Modell wurde zentriert!");
-      });
-
-      // 2. MODELL GREIFEN UND VERSCHIEBEN
-      hand.addEventListener('triggerdown', () => {
-        // Prüfen, ob der gelbe Strahl das Modell trifft
-        const intersections = hand.components.raycaster.intersections;
-        
-        if (intersections.length > 0) {
-            // TREFFER: Modell springt an den Controller
-            container.setAttribute('position', '0 0 -0.5'); 
-            hand.appendChild(container);
-            console.log("Modell gegriffen!");
-        } else {
-            // DANEBEN GEKLICKT: Modell springt zurück vor dich in den Raum
-            container.setAttribute('position', '0 1.2 -1'); 
-            document.querySelector('a-scene').appendChild(container);
-            console.log("Modell zurückgesetzt.");
-        }
-      });
-    </script>
   </body>
 </html>
