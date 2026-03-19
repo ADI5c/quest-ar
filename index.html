@@ -2,27 +2,68 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Speed Run</title>
+    <title>AR Brille - Steuerung fix</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/gh/donmccurdy/aframe-extras@v7.2.0/dist/aframe-extras.min.js"></script>
   </head>
-  <body style="margin: 0; overflow: hidden;">
-    <a-scene xr-mode-ui="XRMode: ar">
+  <body>
+    <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
       
       <a-assets>
-        <a-asset-item id="helmet" src="EntwurfARBrille.glb"></a-asset-item>
+        <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
-      <a-entity 
-        gltf-model="#helmet" 
-        position="0 1.2 -1" 
-        scale="0.5 0.5 0.5"
-        id="target-obj">
+      <a-entity id="anchor" position="0 1.2 -0.5">
+          <a-entity 
+            id="modell-instanz"
+            gltf-model="#meinModell" 
+            scale="0.2 0.2 0.2" 
+            class="clickable"
+            position="0 0 0"> 
+          </a-entity>
       </a-entity>
 
-      <a-light type="ambient" intensity="0.8"></a-light>
+      <a-entity id="rightHand" oculus-touch-controls="hand: right" 
+                raycaster="objects: .clickable; showLine: true; far: 10"
+                line="color: cyan; opacity: 0.7">
+      </a-entity>
+
+      <a-light type="ambient" intensity="1.5"></a-light>
       <a-light type="directional" position="1 2 1" intensity="1"></a-light>
-      
-      <a-entity camera look-controls></a-entity>
+      <a-camera position="0 1.6 0"></a-camera>
+
     </a-scene>
+
+    <script>
+      const modelAnchor = document.querySelector('#anchor');
+      const rightHand = document.querySelector('#rightHand');
+      let isGrabbed = false;
+
+      // Wenn der Strahl das Modell trifft und man den Trigger drückt
+      rightHand.addEventListener('triggerdown', function () {
+        const intersections = rightHand.components.raycaster.intersections;
+        if (intersections.length > 0) {
+          isGrabbed = true;
+          // Das Modell "klebt" jetzt am Controller
+          modelAnchor.setAttribute('position', '0 0 -0.3'); 
+          rightHand.appendChild(modelAnchor); 
+          console.log("Objekt gegriffen!");
+        }
+      });
+
+      // Wenn man den Trigger loslässt, bleibt es im Raum stehen
+      rightHand.addEventListener('triggerup', function () {
+        if (isGrabbed) {
+          isGrabbed = false;
+          // Wir lösen es vom Controller und lassen es in der Welt
+          const worldPos = new THREE.Vector3();
+          modelAnchor.object3D.getWorldPosition(worldPos);
+          
+          document.querySelector('a-scene').appendChild(modelAnchor);
+          modelAnchor.setAttribute('position', worldPos);
+          console.log("Objekt losgelassen!");
+        }
+      });
+    </script>
   </body>
 </html>
