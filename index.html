@@ -9,24 +9,36 @@
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
           const controller = this.el;
+          const sceneEl = document.querySelector('a-scene');
+          const scene = sceneEl.object3D;
           const target = document.querySelector('#parent-container');
-          const scene = document.querySelector('a-scene').object3D;
+          const camera = document.querySelector('a-camera');
+
           let isGrabbed = false;
 
-          const moveStep = 0.05;
-          const minZ = -5.0;   // weiter weg
-          const maxZ = -0.2;   // näher zur Kamera
+          const deadzone = 0.2;
+          const rotateStep = 0.03;
+          const moveStep = 0.06;
+          const minDistance = 0.25;
+          const maxDistance = 4.0;
 
-          // 1. GREIFEN
+          const camWorld = new THREE.Vector3();
+          const objWorld = new THREE.Vector3();
+          const dirWorld = new THREE.Vector3();
+          const newWorld = new THREE.Vector3();
+
+          // GREIFEN
           controller.addEventListener('triggerdown', () => {
-            const hits = controller.components.raycaster.intersections;
+            const raycaster = controller.components.raycaster;
+            const hits = raycaster ? raycaster.intersections : [];
+
             if (hits.length > 0) {
               isGrabbed = true;
               controller.object3D.attach(target.object3D);
             }
           });
 
-          // 2. LOSLASSEN
+          // LOSLASSEN
           controller.addEventListener('triggerup', () => {
             if (isGrabbed) {
               isGrabbed = false;
@@ -34,39 +46,53 @@
             }
           });
 
-          // 3. JOYSTICK
+          // JOYSTICK
           controller.addEventListener('thumbstickmoved', (evt) => {
             if (isGrabbed) return;
 
-            // Drehen links / rechts
-            if (evt.detail.x > 0.2) {
-              target.object3D.rotation.y += 0.03;
-            }
-            if (evt.detail.x < -0.2) {
-              target.object3D.rotation.y -= 0.03;
-            }
+            const x = evt.detail.x || 0;
+            const y = evt.detail.y || 0;
 
-            // Zoom / Distanz
-            // Stick zu dir = näher
-            if (evt.detail.y > 0.2) {
-              target.object3D.position.z = Math.min(
-                maxZ,
-                target.object3D.position.z + moveStep
-              );
-            }
+            // DREHEN
+            if (x > deadzone) target.object3D.rotation.y += rotateStep;
+            if (x < -deadzone) target.object3D.rotation.y -= rotateStep;
 
-            // Stick nach vorne = weiter weg
-            if (evt.detail.y < -0.2) {
-              target.object3D.position.z = Math.max(
-                minZ,
-                target.object3D.position.z - moveStep
-              );
+            // ZOOM / DISTANZ
+            if (Math.abs(y) > deadzone) {
+              // Weltpositionen holen
+              camera.object3D.getWorldPosition(camWorld);
+              target.object3D.getWorldPosition(objWorld);
+
+              // Richtung von Kamera -> Objekt
+              dirWorld.subVectors(objWorld, camWorld);
+              let distance = dirWorld.length();
+
+              if (distance < 0.0001) return;
+
+              dirWorld.normalize();
+
+              // Stick zu dir ziehen = näher
+              if (y > deadzone) {
+                distance = Math.max(minDistance, distance - moveStep);
+              }
+
+              // Stick nach vorne = weiter weg
+              if (y < -deadzone) {
+                distance = Math.min(maxDistance, distance + moveStep);
+              }
+
+              // Neue Weltposition entlang der Blicklinie
+              newWorld.copy(camWorld).add(dirWorld.multiplyScalar(distance));
+
+              // Da target direkt an der Scene hängt, können wir Welt = Lokal setzen
+              target.object3D.position.copy(newWorld);
             }
           });
         }
       });
     </script>
   </head>
+
   <body>
     <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
       <a-assets>
@@ -74,11 +100,11 @@
       </a-assets>
 
       <a-entity id="parent-container" position="0 1.2 -1">
-        <a-entity 
+        <a-entity
           id="modell-objekt"
-          gltf-model="#meinModell" 
+          gltf-model="#meinModell"
           class="clickable"
-          scale="2 2 2">
+          scale="1 1 1">
         </a-entity>
       </a-entity>
 
