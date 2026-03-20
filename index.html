@@ -10,20 +10,22 @@
         init: function () {
           this.controller = this.el;
           this.sceneEl = document.querySelector('a-scene');
-          this.sceneObj = this.sceneEl.object3D;
-
           this.rig = document.querySelector('#rig').object3D;
           this.modelNode = document.querySelector('#model-node').object3D;
           this.cameraObj = document.querySelector('a-camera').object3D;
 
           this.isGrabbed = false;
+          
+          // Stick-Werte speichern
+          this.stickX = 0;
+          this.stickY = 0;
 
           this.deadzone = 0.2;
-          this.rotateStep = 0.04;
-          this.zoomStep = 0.06;
+          this.rotateStep = 0.05; // Etwas weicher
+          this.zoomStep = 0.03;   // Pro Frame, daher kleinerer Wert
 
-          this.minDistance = 0.12;
-          this.maxDistance = 3.0;
+          this.minDistance = 0.2;
+          this.maxDistance = 4.0;
 
           // Objekt in der Hand leicht vor dem Controller
           this.holdOffset = new THREE.Vector3(0, -0.02, -0.18);
@@ -37,6 +39,7 @@
           this.tmpDir = new THREE.Vector3();
           this.tmpForward = new THREE.Vector3();
 
+          // --- GREIFEN (Trigger) ---
           this.controller.addEventListener('triggerdown', () => {
             const raycaster = this.controller.components.raycaster;
             const hits = raycaster ? raycaster.intersections : [];
@@ -56,62 +59,65 @@
             this.isGrabbed = false;
           });
 
+          // --- STICK BEWEGUNG AUSLESEN ---
           this.controller.addEventListener('thumbstickmoved', (evt) => {
-            const x = evt.detail.x || 0;
-            const y = evt.detail.y || 0;
-
-            // Drehen
-            if (x > this.deadzone) this.modelNode.rotation.y += this.rotateStep;
-            if (x < -this.deadzone) this.modelNode.rotation.y -= this.rotateStep;
-
-            // Zoom nur wenn NICHT gegriffen
-            if (this.isGrabbed) return;
-            if (Math.abs(y) < this.deadzone) return;
-
-            this.cameraObj.getWorldPosition(this.tmpCamPos);
-            this.rig.getWorldPosition(this.tmpRigPos);
-
-            this.tmpDir.subVectors(this.tmpRigPos, this.tmpCamPos);
-            let dist = this.tmpDir.length();
-
-            if (dist < 0.0001) {
-              this.cameraObj.getWorldDirection(this.tmpForward);
-              this.tmpDir.copy(this.tmpForward);
-              dist = 0.5;
-            } else {
-              this.tmpDir.normalize();
-            }
-
-            // Stick zu dir ziehen => näher
-            if (y > this.deadzone) {
-              dist = Math.max(this.minDistance, dist - this.zoomStep);
-            }
-
-            // Stick nach vorne drücken => weiter weg
-            if (y < -this.deadzone) {
-              dist = Math.min(this.maxDistance, dist + this.zoomStep);
-            }
-
-            this.tmpRigPos.copy(this.tmpCamPos).add(this.tmpDir.multiplyScalar(dist));
-            this.rig.position.copy(this.tmpRigPos);
+            this.stickX = evt.detail.x || 0;
+            this.stickY = evt.detail.y || 0;
           });
         },
 
+        // --- TICK: KONTINUIERLICHE UPDATES PRO FRAME ---
         tick: function () {
-          if (!this.isGrabbed) return;
+          // 1. ZOOM & ROTATION (nur wenn Stick bewegt wird)
+          if (!this.isGrabbed) {
+            // Rotation (X-Achse des Sticks)
+            if (Math.abs(this.stickX) > this.deadzone) {
+               // Wenn Stick nach rechts, drehe Modell
+               this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
+            }
 
-          // Controller Weltposition + Orientierung holen
-          this.controller.object3D.getWorldPosition(this.tmpControllerPos);
-          this.controller.object3D.getWorldQuaternion(this.tmpControllerQuat);
+            // Zoom (Y-Achse des Sticks)
+            if (Math.abs(this.stickY) > this.deadzone) {
+              this.cameraObj.getWorldPosition(this.tmpCamPos);
+              this.rig.getWorldPosition(this.tmpRigPos);
 
-          // Offset relativ zur Controller-Ausrichtung
-          this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
+              this.tmpDir.subVectors(this.tmpRigPos, this.tmpCamPos);
+              let dist = this.tmpDir.length();
 
-          // Rig direkt vor die Hand setzen
-          this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
+              if (dist < 0.0001) {
+                this.cameraObj.getWorldDirection(this.tmpForward);
+                this.tmpDir.copy(this.tmpForward);
+                dist = 0.5;
+              } else {
+                this.tmpDir.normalize();
+              }
 
-          // Optional: Grundausrichtung der Hand übernehmen
-          this.rig.quaternion.copy(this.tmpControllerQuat);
+              // Y-Stick: Ziehen (positiv) = näher, Drücken (negativ) = weiter weg
+              if (this.stickY > this.deadzone) {
+                dist -= this.zoomStep; // Näher ran
+              } else if (this.stickY < -this.deadzone) {
+                dist += this.zoomStep; // Weiter weg
+              }
+
+              // Distanz begrenzen
+              dist = Math.max(this.minDistance, Math.min(this.maxDistance, dist));
+
+              // Neue Position setzen
+              this.tmpRigPos.copy(this.tmpCamPos).add(this.tmpDir.multiplyScalar(dist));
+              this.rig.position.copy(this.tmpRigPos);
+            }
+          }
+
+          // 2. GREIFEN VERHALTEN
+          if (this.isGrabbed) {
+            this.controller.object3D.getWorldPosition(this.tmpControllerPos);
+            this.controller.object3D.getWorldQuaternion(this.tmpControllerQuat);
+
+            this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
+
+            this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
+            this.rig.quaternion.copy(this.tmpControllerQuat);
+          }
         }
       });
     </script>
@@ -124,25 +130,22 @@
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
-      <!-- Gesamtes Objekt -->
-      <a-entity id="rig" position="0 1.25 -0.6">
+      <a-entity id="rig" position="0 1.5 -0.4">
 
-        <!-- unsichtbarer Greif-Körper -->
         <a-box
           class="grabbable"
           position="0 0 0"
           depth="0.30"
           height="0.16"
           width="0.22"
-          material="opacity: 0; transparent: true">
+          material="color: red; opacity: 0.3; transparent: true">
         </a-box>
 
-        <!-- nur Modellrotation -->
         <a-entity id="model-node">
           <a-entity
             id="modell-objekt"
             gltf-model="#meinModell"
-            scale="0.1 0.1 0.1">
+            scale="1 1 1">
           </a-entity>
         </a-entity>
 
@@ -150,7 +153,7 @@
 
       <a-entity id="hand"
                 oculus-touch-controls="hand: right"
-                raycaster="objects: .grabbable; showLine: true; far: 100"
+                raycaster="objects: .grabbable; showLine: true; far: 10"
                 line="color: yellow; opacity: 1"
                 ar-steuerung>
       </a-entity>
