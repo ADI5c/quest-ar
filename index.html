@@ -9,23 +9,25 @@
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
           const controller = this.el;
-          const sceneEl = document.querySelector('a-scene');
-          const scene = sceneEl.object3D;
-          const target = document.querySelector('#parent-container');
-          const camera = document.querySelector('a-camera');
+          const scene = document.querySelector('a-scene').object3D;
+
+          // Hierarchie
+          const rig = document.querySelector('#rig');
+          const distanceNode = document.querySelector('#distance-node');
+          const modelNode = document.querySelector('#model-node');
 
           let isGrabbed = false;
 
           const deadzone = 0.2;
-          const rotateStep = 0.03;
-          const moveStep = 0.06;
-          const minDistance = 0.25;
-          const maxDistance = 4.0;
+          const rotateStep = 0.04;
+          const zoomStep = 0.05;
 
-          const camWorld = new THREE.Vector3();
-          const objWorld = new THREE.Vector3();
-          const dirWorld = new THREE.Vector3();
-          const newWorld = new THREE.Vector3();
+          // Achtung:
+          // distance-node startet bei z = -1
+          // näher = Richtung 0
+          // weiter weg = stärker negativ
+          const minZ = -1.8;   // weiter weg
+          const maxZ = -0.08;  // sehr nah
 
           // GREIFEN
           controller.addEventListener('triggerdown', () => {
@@ -34,7 +36,7 @@
 
             if (hits.length > 0) {
               isGrabbed = true;
-              controller.object3D.attach(target.object3D);
+              controller.object3D.attach(rig.object3D);
             }
           });
 
@@ -42,69 +44,66 @@
           controller.addEventListener('triggerup', () => {
             if (isGrabbed) {
               isGrabbed = false;
-              scene.attach(target.object3D);
+              scene.attach(rig.object3D);
             }
           });
 
           // JOYSTICK
           controller.addEventListener('thumbstickmoved', (evt) => {
-            if (isGrabbed) return;
-
             const x = evt.detail.x || 0;
             const y = evt.detail.y || 0;
 
-            // DREHEN
-            if (x > deadzone) target.object3D.rotation.y += rotateStep;
-            if (x < -deadzone) target.object3D.rotation.y -= rotateStep;
+            // DREHEN = nur Modell drehen
+            if (x > deadzone) {
+              modelNode.object3D.rotation.y += rotateStep;
+            }
+            if (x < -deadzone) {
+              modelNode.object3D.rotation.y -= rotateStep;
+            }
 
-            // ZOOM / DISTANZ
-            if (Math.abs(y) > deadzone) {
-              // Weltpositionen holen
-              camera.object3D.getWorldPosition(camWorld);
-              target.object3D.getWorldPosition(objWorld);
+            // ZOOM = nur Distanzknoten verschieben
+            // Stick zu dir ziehen => näher => z Richtung 0
+            if (y > deadzone) {
+              distanceNode.object3D.position.z = Math.min(
+                maxZ,
+                distanceNode.object3D.position.z + zoomStep
+              );
+            }
 
-              // Richtung von Kamera -> Objekt
-              dirWorld.subVectors(objWorld, camWorld);
-              let distance = dirWorld.length();
-
-              if (distance < 0.0001) return;
-
-              dirWorld.normalize();
-
-              // Stick zu dir ziehen = näher
-              if (y > deadzone) {
-                distance = Math.max(minDistance, distance - moveStep);
-              }
-
-              // Stick nach vorne = weiter weg
-              if (y < -deadzone) {
-                distance = Math.min(maxDistance, distance + moveStep);
-              }
-
-              // Neue Weltposition entlang der Blicklinie
-              newWorld.copy(camWorld).add(dirWorld.multiplyScalar(distance));
-
-              // Da target direkt an der Scene hängt, können wir Welt = Lokal setzen
-              target.object3D.position.copy(newWorld);
+            // Stick nach vorne drücken => weiter weg => negativer
+            if (y < -deadzone) {
+              distanceNode.object3D.position.z = Math.max(
+                minZ,
+                distanceNode.object3D.position.z - zoomStep
+              );
             }
           });
         }
       });
     </script>
   </head>
-
   <body>
     <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
+
       <a-assets>
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
-      <a-entity id="parent-container" position="0 1.2 -1">
-        <a-entity
-          id="modell-objekt"
-          gltf-model="#meinModell"
-          class="clickable"
-          scale="1 1 1">
+      <!-- Globale Position im Raum -->
+      <a-entity id="rig" position="0 1.2 0">
+
+        <!-- Nur Distanz zur Kamera -->
+        <a-entity id="distance-node" position="0 0 -1">
+
+          <!-- Nur Rotation / Modell -->
+          <a-entity id="model-node" class="clickable">
+            <a-entity
+              id="modell-objekt"
+              gltf-model="#meinModell"
+              scale="0.1 0.1 0.1">
+            </a-entity>
+          </a-entity>
+
         </a-entity>
       </a-entity>
 
@@ -118,6 +117,7 @@
       <a-light type="ambient" intensity="1.5"></a-light>
       <a-light type="directional" position="1 2 1" intensity="1"></a-light>
       <a-camera position="0 1.6 0"></a-camera>
+
     </a-scene>
   </body>
 </html>
