@@ -2,75 +2,119 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Position korrigieren</title>
+    <title>AR Brille - stabile Steuerung</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
-      // (Die JavaScript-Logik bleibt gleich, sie funktioniert ja)
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
           this.controller = this.el;
+          this.sceneEl = document.querySelector('a-scene');
           this.rig = document.querySelector('#rig').object3D;
           this.modelNode = document.querySelector('#model-node').object3D;
           this.cameraObj = document.querySelector('a-camera').object3D;
 
           this.isGrabbed = false;
+          
+          // Stick-Werte speichern
           this.stickX = 0;
           this.stickY = 0;
+
           this.deadzone = 0.2;
-          this.rotateStep = 0.05; 
-          this.zoomStep = 0.03;   
+          this.rotateStep = 0.05; // Etwas weicher
+          this.zoomStep = 0.03;   // Pro Frame, daher kleinerer Wert
 
           this.minDistance = 0.2;
           this.maxDistance = 4.0;
+
+          // Objekt in der Hand leicht vor dem Controller
           this.holdOffset = new THREE.Vector3(0, -0.02, -0.18);
+
           this.tmpControllerPos = new THREE.Vector3();
           this.tmpControllerQuat = new THREE.Quaternion();
           this.tmpOffset = new THREE.Vector3();
+
           this.tmpCamPos = new THREE.Vector3();
           this.tmpRigPos = new THREE.Vector3();
           this.tmpDir = new THREE.Vector3();
           this.tmpForward = new THREE.Vector3();
 
+          // --- GREIFEN (Trigger) ---
           this.controller.addEventListener('triggerdown', () => {
             const raycaster = this.controller.components.raycaster;
             const hits = raycaster ? raycaster.intersections : [];
+
             if (!hits || hits.length === 0) return;
+
             for (let i = 0; i < hits.length; i++) {
-              if (hits[i].object && hits[i].object.el && hits[i].object.el.classList.contains('grabbable')) {
-                this.isGrabbed = true; break;
+              const hit = hits[i];
+              if (hit.object && hit.object.el && hit.object.el.classList.contains('grabbable')) {
+                this.isGrabbed = true;
+                break;
               }
             }
           });
 
-          this.controller.addEventListener('triggerup', () => { this.isGrabbed = false; });
+          this.controller.addEventListener('triggerup', () => {
+            this.isGrabbed = false;
+          });
+
+          // --- STICK BEWEGUNG AUSLESEN ---
           this.controller.addEventListener('thumbstickmoved', (evt) => {
-            this.stickX = evt.detail.x || 0; this.stickY = evt.detail.y || 0;
+            this.stickX = evt.detail.x || 0;
+            this.stickY = evt.detail.y || 0;
           });
         },
 
+        // --- TICK: KONTINUIERLICHE UPDATES PRO FRAME ---
         tick: function () {
+          // 1. ZOOM & ROTATION (nur wenn Stick bewegt wird)
           if (!this.isGrabbed) {
+            // Rotation (X-Achse des Sticks)
             if (Math.abs(this.stickX) > this.deadzone) {
+               // Wenn Stick nach rechts, drehe Modell
                this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
             }
+
+            // Zoom (Y-Achse des Sticks)
             if (Math.abs(this.stickY) > this.deadzone) {
               this.cameraObj.getWorldPosition(this.tmpCamPos);
               this.rig.getWorldPosition(this.tmpRigPos);
+
               this.tmpDir.subVectors(this.tmpRigPos, this.tmpCamPos);
               let dist = this.tmpDir.length();
-              this.tmpDir.normalize();
-              if (this.stickY > this.deadzone) dist -= this.zoomStep; 
-              else if (this.stickY < -this.deadzone) dist += this.zoomStep;
+
+              if (dist < 0.0001) {
+                this.cameraObj.getWorldDirection(this.tmpForward);
+                this.tmpDir.copy(this.tmpForward);
+                dist = 0.5;
+              } else {
+                this.tmpDir.normalize();
+              }
+
+              // Y-Stick: Ziehen (positiv) = näher, Drücken (negativ) = weiter weg
+              if (this.stickY > this.deadzone) {
+                dist -= this.zoomStep; // Näher ran
+              } else if (this.stickY < -this.deadzone) {
+                dist += this.zoomStep; // Weiter weg
+              }
+
+              // Distanz begrenzen
               dist = Math.max(this.minDistance, Math.min(this.maxDistance, dist));
+
+              // Neue Position setzen
               this.tmpRigPos.copy(this.tmpCamPos).add(this.tmpDir.multiplyScalar(dist));
               this.rig.position.copy(this.tmpRigPos);
             }
           }
+
+          // 2. GREIFEN VERHALTEN
           if (this.isGrabbed) {
             this.controller.object3D.getWorldPosition(this.tmpControllerPos);
             this.controller.object3D.getWorldQuaternion(this.tmpControllerQuat);
+
             this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
+
             this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
             this.rig.quaternion.copy(this.tmpControllerQuat);
           }
@@ -81,34 +125,36 @@
 
   <body>
     <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
+
       <a-assets>
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
-      <a-entity id="rig" position="0 0.8 -0.6">
+      <a-entity id="rig" position="0 1.5 -0.4">
 
         <a-box
           class="grabbable"
           position="0 0 0"
-          depth="2.0"
-          height="2.0"
-          width="2.0"
-          material="color: green; opacity: 0.1; transparent: true">
+          depth="0.30"
+          height="0.16"
+          width="0.22"
+          material="color: red; opacity: 0.3; transparent: true">
         </a-box>
 
         <a-entity id="model-node">
           <a-entity
             id="modell-objekt"
+            position="0 0 0"
             gltf-model="#meinModell"
-            scale="1 1 1" 
-            position="0 0 -1"> </a-entity>
+            scale="0.1 0.1 0.1">
+          </a-entity>
         </a-entity>
 
       </a-entity>
 
       <a-entity id="hand"
                 oculus-touch-controls="hand: right"
-                raycaster="objects: .grabbable; showLine: true; far: 100"
+                raycaster="objects: .grabbable; showLine: true; far: 10"
                 line="color: yellow; opacity: 1"
                 ar-steuerung>
       </a-entity>
@@ -116,6 +162,7 @@
       <a-light type="ambient" intensity="1.5"></a-light>
       <a-light type="directional" position="1 2 1" intensity="1"></a-light>
       <a-camera position="0 1.6 0"></a-camera>
+
     </a-scene>
   </body>
 </html>
