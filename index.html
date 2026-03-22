@@ -145,15 +145,20 @@
   </head>
 
   <body>
-    <a-scene xr-mode-ui="XRMode: ar" renderer="colorManagement: true">
+    <a-scene 
+  xr-mode-ui="XRMode: ar" 
+  renderer="colorManagement: true; antialias: true; physicallyCorrectLights: true; exposure: 1.2;">
 
       <a-assets>
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
       <a-camera position="0 1.6 0"></a-camera>
-      <a-light type="ambient" intensity="1.5"></a-light>
-      <a-light type="directional" position="1 2 1" intensity="1"></a-light>
+      <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
+
+<a-light type="directional" color="#FFF" intensity="1.5" position="-1 2 1" castShadow="true"></a-light>
+
+<a-light type="directional" color="#FFDDBB" intensity="0.5" position="1 -1 -1"></a-light>
 
       <a-entity id="rig" position="0 1.2 -0.6">
         <a-box
@@ -170,7 +175,7 @@
             id="modell-objekt"
             gltf-model="#meinModell"
             scale="1 1 1"
-            position="-2 0 0"
+            position="-1.3 0 0"
             auto-center>
           </a-entity>
         </a-entity>
