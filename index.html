@@ -175,18 +175,19 @@
             id="modell-objekt"
             gltf-model="#meinModell"
             scale="1 1 1"
-            position="-1.3 0 0"
+            position="-0.8 0 0.2"
             auto-center>
           </a-entity>
         </a-entity>
       </a-entity>
 
-      <a-entity id="hand"
-                oculus-touch-controls="hand: right"
-                raycaster="objects: .grabbable; showLine: true; far: 100"
-                line="color: yellow; opacity: 1"
-                ar-steuerung>
-      </a-entity>
+  <a-entity id="hand"
+          oculus-touch-controls="hand: right"
+          hand-tracking-controls="hand: right"
+          raycaster="objects: .grabbable; showLine: true; far: 100"
+          line="color: yellow; opacity: 1"
+          ar-steuerung>
+</a-entity>
 
     </a-scene>
   </body>
