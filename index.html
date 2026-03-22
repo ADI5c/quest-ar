@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Komplett & Zentriert</title>
+    <title>AR Brille - Absturzsicher</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
@@ -12,12 +12,20 @@
           this.el.addEventListener('model-loaded', (e) => {
             const model = e.detail.model;
             
-            // Berechnet den tatsächlichen, unsichtbaren Rahmen um dein 3D-Modell
+            // Sicherheitscheck: Gibt es das Modell wirklich?
+            if (!model) return;
+
             const box = new THREE.Box3().setFromObject(model);
+            
+            // Sicherheitscheck: Ist die Bounding Box leer?
+            if (box.isEmpty()) {
+              console.warn("Das 3D-Modell ist leer oder hat keine Geometrie.");
+              return;
+            }
+
             const center = new THREE.Vector3();
             box.getCenter(center);
             
-            // Verschiebt das Modell intern genau so, dass seine echte Mitte auf 0,0,0 liegt
             model.position.x -= center.x;
             model.position.y -= center.y;
             model.position.z -= center.z;
@@ -27,17 +35,17 @@
         }
       });
 
-      // --- KOMPONENTE 2: DIE AR-STEUERUNG (Greifen, Zoomen, Drehen) ---
+      // --- KOMPONENTE 2: DIE AR-STEUERUNG ---
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
           this.controller = this.el;
           this.sceneEl = document.querySelector('a-scene');
+          
+          // Wir holen uns die Objekte erst, wenn sie wirklich da sind!
           this.rig = document.querySelector('#rig').object3D;
           this.modelNode = document.querySelector('#model-node').object3D;
-          this.cameraObj = document.querySelector('a-camera').object3D;
 
           this.isGrabbed = false;
-          
           this.stickX = 0;
           this.stickY = 0;
 
@@ -47,55 +55,55 @@
 
           this.minDistance = 0.2;
           this.maxDistance = 4.0;
-
           this.holdOffset = new THREE.Vector3(0, -0.02, -0.18);
 
           this.tmpControllerPos = new THREE.Vector3();
           this.tmpControllerQuat = new THREE.Quaternion();
           this.tmpOffset = new THREE.Vector3();
-
           this.tmpCamPos = new THREE.Vector3();
           this.tmpRigPos = new THREE.Vector3();
           this.tmpDir = new THREE.Vector3();
           this.tmpForward = new THREE.Vector3();
 
-          // Greifen starten
           this.controller.addEventListener('triggerdown', () => {
             const raycaster = this.controller.components.raycaster;
             const hits = raycaster ? raycaster.intersections : [];
-
             if (!hits || hits.length === 0) return;
 
             for (let i = 0; i < hits.length; i++) {
-              const hit = hits[i];
-              if (hit.object && hit.object.el && hit.object.el.classList.contains('grabbable')) {
+              if (hits[i].object && hits[i].object.el && hits[i].object.el.classList.contains('grabbable')) {
                 this.isGrabbed = true;
                 break;
               }
             }
           });
 
-          // Greifen beenden
           this.controller.addEventListener('triggerup', () => {
             this.isGrabbed = false;
           });
 
-          // Stick-Werte speichern
           this.controller.addEventListener('thumbstickmoved', (evt) => {
             this.stickX = evt.detail.x || 0;
             this.stickY = evt.detail.y || 0;
           });
         },
 
-        // Update-Schleife für flüssige Bewegungen
         tick: function () {
+          // SICHERHEITS-CHECK: Kamera dynamisch holen, falls sie beim Start noch nicht da war
+          if (!this.cameraObj) {
+            const camEl = document.querySelector('a-camera');
+            if (camEl && camEl.object3D) {
+              this.cameraObj = camEl.object3D;
+            } else {
+              return; // Wenn die Kamera noch nicht da ist, diesen Frame überspringen
+            }
+          }
+
           if (!this.isGrabbed) {
-            // Drehen
             if (Math.abs(this.stickX) > this.deadzone) {
                this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
             }
 
-            // Zoomen
             if (Math.abs(this.stickY) > this.deadzone) {
               this.cameraObj.getWorldPosition(this.tmpCamPos);
               this.rig.getWorldPosition(this.tmpRigPos);
@@ -127,9 +135,7 @@
           if (this.isGrabbed) {
             this.controller.object3D.getWorldPosition(this.tmpControllerPos);
             this.controller.object3D.getWorldQuaternion(this.tmpControllerQuat);
-
             this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
-
             this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
             this.rig.quaternion.copy(this.tmpControllerQuat);
           }
@@ -145,8 +151,11 @@
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
-      <a-entity id="rig" position="0 1.2 -0.6">
+      <a-camera position="0 1.6 0"></a-camera>
+      <a-light type="ambient" intensity="1.5"></a-light>
+      <a-light type="directional" position="1 2 1" intensity="1"></a-light>
 
+      <a-entity id="rig" position="0 1.2 -0.6">
         <a-box
           class="grabbable"
           position="0 0 0"
@@ -162,9 +171,9 @@
             gltf-model="#meinModell"
             scale="0.1 0.1 0.1"
             position="0 0 0"
-            auto-center> </a-entity>
+            auto-center>
+          </a-entity>
         </a-entity>
-
       </a-entity>
 
       <a-entity id="hand"
@@ -173,10 +182,6 @@
                 line="color: yellow; opacity: 1"
                 ar-steuerung>
       </a-entity>
-
-      <a-light type="ambient" intensity="1.5"></a-light>
-      <a-light type="directional" position="1 2 1" intensity="1"></a-light>
-      <a-camera position="0 1.6 0"></a-camera>
 
     </a-scene>
   </body>
