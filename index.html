@@ -2,10 +2,32 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - stabile Steuerung</title>
+    <title>AR Brille - Komplett & Zentriert</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
+      // --- KOMPONENTE 1: DAS MODELL AUTOMATISCH ZENTRIEREN ---
+      AFRAME.registerComponent('auto-center', {
+        init: function () {
+          this.el.addEventListener('model-loaded', (e) => {
+            const model = e.detail.model;
+            
+            // Berechnet den tatsächlichen, unsichtbaren Rahmen um dein 3D-Modell
+            const box = new THREE.Box3().setFromObject(model);
+            const center = new THREE.Vector3();
+            box.getCenter(center);
+            
+            // Verschiebt das Modell intern genau so, dass seine echte Mitte auf 0,0,0 liegt
+            model.position.x -= center.x;
+            model.position.y -= center.y;
+            model.position.z -= center.z;
+            
+            console.log("Modell wurde erfolgreich zentriert!");
+          });
+        }
+      });
+
+      // --- KOMPONENTE 2: DIE AR-STEUERUNG (Greifen, Zoomen, Drehen) ---
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
           this.controller = this.el;
@@ -16,18 +38,16 @@
 
           this.isGrabbed = false;
           
-          // Stick-Werte speichern
           this.stickX = 0;
           this.stickY = 0;
 
           this.deadzone = 0.2;
-          this.rotateStep = 0.05; // Etwas weicher
-          this.zoomStep = 0.03;   // Pro Frame, daher kleinerer Wert
+          this.rotateStep = 0.05; 
+          this.zoomStep = 0.03;   
 
           this.minDistance = 0.2;
           this.maxDistance = 4.0;
 
-          // Objekt in der Hand leicht vor dem Controller
           this.holdOffset = new THREE.Vector3(0, -0.02, -0.18);
 
           this.tmpControllerPos = new THREE.Vector3();
@@ -39,7 +59,7 @@
           this.tmpDir = new THREE.Vector3();
           this.tmpForward = new THREE.Vector3();
 
-          // --- GREIFEN (Trigger) ---
+          // Greifen starten
           this.controller.addEventListener('triggerdown', () => {
             const raycaster = this.controller.components.raycaster;
             const hits = raycaster ? raycaster.intersections : [];
@@ -55,28 +75,27 @@
             }
           });
 
+          // Greifen beenden
           this.controller.addEventListener('triggerup', () => {
             this.isGrabbed = false;
           });
 
-          // --- STICK BEWEGUNG AUSLESEN ---
+          // Stick-Werte speichern
           this.controller.addEventListener('thumbstickmoved', (evt) => {
             this.stickX = evt.detail.x || 0;
             this.stickY = evt.detail.y || 0;
           });
         },
 
-        // --- TICK: KONTINUIERLICHE UPDATES PRO FRAME ---
+        // Update-Schleife für flüssige Bewegungen
         tick: function () {
-          // 1. ZOOM & ROTATION (nur wenn Stick bewegt wird)
           if (!this.isGrabbed) {
-            // Rotation (X-Achse des Sticks)
+            // Drehen
             if (Math.abs(this.stickX) > this.deadzone) {
-               // Wenn Stick nach rechts, drehe Modell
                this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
             }
 
-            // Zoom (Y-Achse des Sticks)
+            // Zoomen
             if (Math.abs(this.stickY) > this.deadzone) {
               this.cameraObj.getWorldPosition(this.tmpCamPos);
               this.rig.getWorldPosition(this.tmpRigPos);
@@ -92,23 +111,19 @@
                 this.tmpDir.normalize();
               }
 
-              // Y-Stick: Ziehen (positiv) = näher, Drücken (negativ) = weiter weg
               if (this.stickY > this.deadzone) {
-                dist -= this.zoomStep; // Näher ran
+                dist -= this.zoomStep; 
               } else if (this.stickY < -this.deadzone) {
-                dist += this.zoomStep; // Weiter weg
+                dist += this.zoomStep; 
               }
 
-              // Distanz begrenzen
               dist = Math.max(this.minDistance, Math.min(this.maxDistance, dist));
 
-              // Neue Position setzen
               this.tmpRigPos.copy(this.tmpCamPos).add(this.tmpDir.multiplyScalar(dist));
               this.rig.position.copy(this.tmpRigPos);
             }
           }
 
-          // 2. GREIFEN VERHALTEN
           if (this.isGrabbed) {
             this.controller.object3D.getWorldPosition(this.tmpControllerPos);
             this.controller.object3D.getWorldQuaternion(this.tmpControllerQuat);
@@ -130,31 +145,31 @@
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
-      <a-entity id="rig" position="0 1.5 -0.4">
+      <a-entity id="rig" position="0 1.2 -0.6">
 
         <a-box
           class="grabbable"
           position="0 0 0"
-          depth="0.30"
-          height="0.16"
-          width="0.22"
-          material="color: red; opacity: 0.3; transparent: true">
+          depth="0.5"
+          height="0.5"
+          width="0.5"
+          material="color: green; opacity: 0.2; transparent: true">
         </a-box>
 
         <a-entity id="model-node">
           <a-entity
             id="modell-objekt"
-            position="0 0 0"
             gltf-model="#meinModell"
-            scale="0.1 0.1 0.1">
-          </a-entity>
+            scale="0.1 0.1 0.1"
+            position="0 0 0"
+            auto-center> </a-entity>
         </a-entity>
 
       </a-entity>
 
       <a-entity id="hand"
                 oculus-touch-controls="hand: right"
-                raycaster="objects: .grabbable; showLine: true; far: 1"
+                raycaster="objects: .grabbable; showLine: true; far: 100"
                 line="color: yellow; opacity: 1"
                 ar-steuerung>
       </a-entity>
