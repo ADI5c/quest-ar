@@ -2,151 +2,246 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Controller & Freie Hand</title>
+    <title>AR Brille - Schnittansicht</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
-      // --- KOMPONENTE 1: DAS MODELL AUTOMATISCH ZENTRIEREN ---
+      // ════════════════════════════════════════════════════════════════
+      // KOMPONENTE 1: MODELL AUTOMATISCH ZENTRIEREN
+      // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('auto-center', {
         init: function () {
           this.el.addEventListener('model-loaded', (e) => {
             const model = e.detail.model;
             if (!model) return;
             const box = new THREE.Box3().setFromObject(model);
-            if (box.isEmpty()) {
-              console.warn("Das 3D-Modell ist leer oder hat keine Geometrie.");
-              return;
-            }
+            if (box.isEmpty()) return;
             const center = new THREE.Vector3();
             box.getCenter(center);
             model.position.x -= center.x;
             model.position.y -= center.y;
             model.position.z -= center.z;
-            console.log("Modell wurde erfolgreich zentriert!");
+            console.log("Modell zentriert.");
           });
         }
       });
 
-      // --- KOMPONENTE 2: DIE AR-STEUERUNG ---
+      // ════════════════════════════════════════════════════════════════
+      // KOMPONENTE 2: SCHNITTANSICHT (Clipping Plane)
+      // ════════════════════════════════════════════════════════════════
+      AFRAME.registerComponent('clipping-plane', {
+        schema: {
+          axis:     { type: 'string',  default: 'y' },
+          position: { type: 'number',  default: 0   },
+          enabled:  { type: 'boolean', default: false }
+        },
+
+        init: function () {
+          this.plane = new THREE.Plane();
+          this.clipPosition = 0;
+          this.axis = 'y';
+          this.enabled = false;
+          this.moveSpeed = 0.005;
+
+          const renderer = this.el.sceneEl.renderer;
+          renderer.clippingPlanes = [this.plane];
+          renderer.localClippingEnabled = true;
+
+          this._buildPlaneVisual();
+        },
+
+        _buildPlaneVisual: function () {
+          this.planeVisual = document.createElement('a-entity');
+          this.planeVisual.setAttribute('id', 'plane-visual');
+          document.querySelector('#rig').appendChild(this.planeVisual);
+          this._updatePlaneVisual();
+        },
+
+        _updatePlaneVisual: function () {
+          if (!this.planeVisual) return;
+          const v = this.planeVisual;
+          const p = this.clipPosition;
+          const color   = this.enabled ? '#00CCFF' : '#888888';
+          const opacity = this.enabled ? 0.35 : 0.1;
+
+          if (this.axis === 'y') {
+            v.setAttribute('geometry', 'primitive: plane; width: 0.6; height: 0.6');
+            v.setAttribute('rotation', '0 0 0');
+            v.setAttribute('position', `0 ${p} 0`);
+          } else if (this.axis === 'x') {
+            v.setAttribute('geometry', 'primitive: plane; width: 0.6; height: 0.6');
+            v.setAttribute('rotation', '0 90 0');
+            v.setAttribute('position', `${p} 0 0`);
+          } else if (this.axis === 'z') {
+            v.setAttribute('geometry', 'primitive: plane; width: 0.6; height: 0.6');
+            v.setAttribute('rotation', '90 0 0');
+            v.setAttribute('position', `0 0 ${p}`);
+          }
+
+          v.setAttribute('material',
+            `color: ${color}; opacity: ${opacity}; transparent: true; side: double`);
+          v.setAttribute('visible', this.enabled);
+        },
+
+        cycleAxis: function () {
+          if      (this.axis === 'y') this.axis = 'x';
+          else if (this.axis === 'x') this.axis = 'z';
+          else                         this.axis = 'y';
+          this.clipPosition = 0;
+          this._updatePlaneVisual();
+        },
+
+        toggle: function () {
+          this.enabled = !this.enabled;
+          const renderer = this.el.sceneEl.renderer;
+          renderer.clippingPlanes = this.enabled ? [this.plane] : [];
+          this._updatePlaneVisual();
+        },
+
+        move: function (delta) {
+          this.clipPosition += delta;
+          this.clipPosition = Math.max(-0.4, Math.min(0.4, this.clipPosition));
+          this._updatePlaneVisual();
+        },
+
+        tick: function () {
+          if (!this.enabled) return;
+
+          const rig = document.querySelector('#rig').object3D;
+          const rigPos = new THREE.Vector3();
+          rig.getWorldPosition(rigPos);
+
+          let normal, constant;
+
+          if (this.axis === 'y') {
+            normal   = new THREE.Vector3(0, -1, 0);
+            constant = rigPos.y + this.clipPosition;
+          } else if (this.axis === 'x') {
+            normal   = new THREE.Vector3(-1, 0, 0);
+            constant = rigPos.x + this.clipPosition;
+          } else {
+            normal   = new THREE.Vector3(0, 0, -1);
+            constant = rigPos.z + this.clipPosition;
+          }
+
+          this.plane.set(normal, constant);
+        }
+      });
+
+      // ════════════════════════════════════════════════════════════════
+      // KOMPONENTE 3: AR-STEUERUNG (Controller)
+      // Trigger       = Objekt greifen & bewegen
+      // Joystick X    = Modell drehen
+      // Joystick Y    = Zoom (Schnitt AUS) / Ebene verschieben (Schnitt AN)
+      // A-Button      = Schnitt EIN/AUS
+      // B-Button      = Achse wechseln Y → X → Z → Y
+      // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
-          this.sceneEl     = document.querySelector('a-scene');
-          this.rig         = document.querySelector('#rig').object3D;
-          this.modelNode   = document.querySelector('#model-node').object3D;
-          this.grabbableEl = document.querySelector('#grab-box');
+          this.rig       = document.querySelector('#rig').object3D;
+          this.modelNode = document.querySelector('#model-node').object3D;
+          this.clipComp  = null;
 
-          this.isGrabbed      = false;
-          this.activeSource   = null;   // 'controller' | 'hand'
-          this.handNearObject = false;
-          this.stickX = 0;
-          this.stickY = 0;
+          this.isGrabbed = false;
+          this.stickX    = 0;
+          this.stickY    = 0;
 
           this.deadzone    = 0.2;
           this.rotateStep  = 0.05;
           this.zoomStep    = 0.03;
           this.minDistance = 0.2;
           this.maxDistance = 4.0;
+          this.holdOffset  = new THREE.Vector3(0, -0.02, -0.18);
 
-          // Wie nah muss die Hand sein, um greifen zu können (Meter)
-          this.grabRadius = 0.15;
-
-          // Offset für Controller-Greifen
-          this.holdOffset = new THREE.Vector3(0, -0.02, -0.18);
-
-          // Temp-Vektoren (kein Garbage in tick)
-          this.tmpHandPos        = new THREE.Vector3();
-          this.tmpRigPos         = new THREE.Vector3();
           this.tmpControllerPos  = new THREE.Vector3();
           this.tmpControllerQuat = new THREE.Quaternion();
           this.tmpOffset         = new THREE.Vector3();
           this.tmpCamPos         = new THREE.Vector3();
+          this.tmpRigPos         = new THREE.Vector3();
           this.tmpDir            = new THREE.Vector3();
           this.tmpForward        = new THREE.Vector3();
 
-          // ── CONTROLLER (Oculus Touch) ──────────────────────────────────────
-          const controllerEl = document.querySelector('#controller-right');
-
-          controllerEl.addEventListener('triggerdown', () => {
-            const raycaster = controllerEl.components.raycaster;
+          // ── GREIFEN ──────────────────────────────────────────────────
+          this.el.addEventListener('triggerdown', () => {
+            const raycaster = this.el.components.raycaster;
             const hits = raycaster ? raycaster.intersections : [];
             for (let i = 0; i < hits.length; i++) {
               if (hits[i].object?.el?.classList.contains('grabbable')) {
-                this.isGrabbed    = true;
-                this.activeSource = 'controller';
-                this._setBoxColor('#FF8800'); // orange = Controller hält
+                this.isGrabbed = true;
                 break;
               }
             }
           });
+          this.el.addEventListener('triggerup', () => { this.isGrabbed = false; });
 
-          controllerEl.addEventListener('triggerup', () => this._endGrab());
-
-          controllerEl.addEventListener('thumbstickmoved', (evt) => {
+          // ── JOYSTICK ─────────────────────────────────────────────────
+          this.el.addEventListener('thumbstickmoved', (evt) => {
             this.stickX = evt.detail.x || 0;
             this.stickY = evt.detail.y || 0;
           });
 
-          // ── HAND-TRACKING ──────────────────────────────────────────────────
-          // Pinch nur aktivieren wenn Hand nah genug am Objekt ist
-          const handEl = document.querySelector('#hand-right');
-
-          handEl.addEventListener('pinchstarted', () => {
-            if (this.handNearObject) {
-              this.isGrabbed    = true;
-              this.activeSource = 'hand';
-              this._setBoxColor('#0088FF'); // blau = Hand hält
-            }
+          // ── A-BUTTON: Schnitt EIN/AUS ─────────────────────────────────
+          this.el.addEventListener('abuttondown', () => {
+            const c = this._getClip();
+            if (c) { c.toggle(); this._updateUI(); }
           });
 
-          handEl.addEventListener('pinchended', () => this._endGrab());
+          // ── B-BUTTON: Achse wechseln ──────────────────────────────────
+          this.el.addEventListener('bbuttondown', () => {
+            const c = this._getClip();
+            if (c) { c.cycleAxis(); this._updateUI(); }
+          });
         },
 
-        _setBoxColor: function (color) {
-          if (this.grabbableEl) {
-            this.grabbableEl.setAttribute('material',
-              `color: ${color}; opacity: 0.3; transparent: true`);
+        _getClip: function () {
+          if (!this.clipComp) {
+            const el = document.querySelector('#clip-controller');
+            if (el) this.clipComp = el.components['clipping-plane'];
           }
+          return this.clipComp;
         },
 
-        _endGrab: function () {
-          this.isGrabbed    = false;
-          this.activeSource = null;
-          this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
+        _updateUI: function () {
+          const c = this._getClip();
+          if (!c) return;
+          const statusEl = document.querySelector('#ui-status');
+          const axisEl   = document.querySelector('#ui-axis');
+          if (statusEl) statusEl.setAttribute('value',
+            c.enabled ? 'Schnitt: AN' : 'Schnitt: AUS');
+          if (axisEl) axisEl.setAttribute('value',
+            'Achse: ' + c.axis.toUpperCase());
         },
 
         tick: function () {
-          // Kamera lazy holen
           if (!this.cameraObj) {
             const camEl = document.querySelector('a-camera');
             if (!camEl?.object3D) return;
             this.cameraObj = camEl.object3D;
           }
 
-          const handEl = document.querySelector('#hand-right');
-          if (!handEl) return;
+          const clip = this._getClip();
 
-          // ── HAND-NÄHE PRÜFEN ──────────────────────────────────────────────
-          if (!this.isGrabbed) {
-            handEl.object3D.getWorldPosition(this.tmpHandPos);
-            this.rig.getWorldPosition(this.tmpRigPos);
-
-            const dist    = this.tmpHandPos.distanceTo(this.tmpRigPos);
-            const wasNear = this.handNearObject;
-            this.handNearObject = dist < this.grabRadius;
-
-            if (this.handNearObject !== wasNear) {
-              this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
-            }
+          // ── WENN GEGRIFFEN: Objekt bewegen ────────────────────────────
+          if (this.isGrabbed) {
+            this.el.object3D.getWorldPosition(this.tmpControllerPos);
+            this.el.object3D.getWorldQuaternion(this.tmpControllerQuat);
+            this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
+            this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
+            this.rig.quaternion.copy(this.tmpControllerQuat);
+            return;
           }
 
-          // ── JOYSTICK: Rotation & Zoom ──────────────────────────────────────
-          if (!this.isGrabbed) {
-            if (Math.abs(this.stickX) > this.deadzone) {
-              this.modelNode.rotation.y +=
-                (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
-            }
+          // ── JOYSTICK X: Modell drehen ─────────────────────────────────
+          if (Math.abs(this.stickX) > this.deadzone) {
+            this.modelNode.rotation.y +=
+              (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
+          }
 
-            if (Math.abs(this.stickY) > this.deadzone) {
+          // ── JOYSTICK Y: Schnittebene ODER Zoom ───────────────────────
+          if (Math.abs(this.stickY) > this.deadzone) {
+            if (clip && clip.enabled) {
+              clip.move(this.stickY * -0.008);
+            } else {
               this.cameraObj.getWorldPosition(this.tmpCamPos);
               this.rig.getWorldPosition(this.tmpRigPos);
               this.tmpDir.subVectors(this.tmpRigPos, this.tmpCamPos);
@@ -164,24 +259,6 @@
               this.rig.position.copy(this.tmpRigPos);
             }
           }
-
-          // ── OBJEKT BEWEGEN ─────────────────────────────────────────────────
-          if (this.isGrabbed) {
-            if (this.activeSource === 'controller') {
-              const controllerEl = document.querySelector('#controller-right');
-              controllerEl.object3D.getWorldPosition(this.tmpControllerPos);
-              controllerEl.object3D.getWorldQuaternion(this.tmpControllerQuat);
-              this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
-              this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
-              this.rig.quaternion.copy(this.tmpControllerQuat);
-
-            } else if (this.activeSource === 'hand') {
-              handEl.object3D.getWorldPosition(this.tmpHandPos);
-              handEl.object3D.getWorldQuaternion(this.tmpControllerQuat);
-              this.rig.position.copy(this.tmpHandPos);
-              this.rig.quaternion.copy(this.tmpControllerQuat);
-            }
-          }
         }
       });
     </script>
@@ -197,28 +274,48 @@
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
-      <a-camera position="0 1.6 0"></a-camera>
+      <a-camera position="0 1.6 0">
+        <!--
+          HUD: Statusanzeige immer im Blickfeld
+          Zeigt aktiven Schnitt-Status und Achse
+        -->
+        <a-entity position="0 -0.3 -0.6">
+          <a-text id="ui-status"
+                  value="Schnitt: AUS"
+                  align="center"
+                  color="#00CCFF"
+                  width="1.2"
+                  position="0 0.06 0">
+          </a-text>
+          <a-text id="ui-axis"
+                  value="Achse: Y"
+                  align="center"
+                  color="#FFFFFF"
+                  width="0.9"
+                  position="0 -0.04 0">
+          </a-text>
+          <a-text
+                  value="[A] Schnitt  [B] Achse  Stick-Y: Ebene/Zoom  Stick-X: Drehen  Trigger: Bewegen"
+                  align="center"
+                  color="#AAAAAA"
+                  width="1.4"
+                  position="0 -0.12 0">
+          </a-text>
+        </a-entity>
+      </a-camera>
 
       <a-light type="ambient"     color="#FFF"    intensity="0.6"></a-light>
-      <a-light type="directional" color="#FFF"    intensity="1.5" position="-1 2 1"  castShadow="true"></a-light>
+      <a-light type="directional" color="#FFF"    intensity="1.5" position="-1 2 1" castShadow="true"></a-light>
       <a-light type="directional" color="#FFDDBB" intensity="0.5" position="1 -1 -1"></a-light>
 
       <a-entity id="rig" position="0 1.2 -0.6">
 
-        <!--
-          Grab-Box: visuelles Feedback + Raycaster-Ziel für Controller
-          Farben:
-            dunkelgrün  = weit weg
-            hellgrün    = Hand in Reichweite → jetzt pinchen!
-            orange      = Controller hält
-            blau        = Hand hält
-        -->
         <a-box
           id="grab-box"
           class="grabbable"
           position="0 0 0"
           depth="0.5" height="0.5" width="0.5"
-          material="color: #00AA00; opacity: 0.2; transparent: true">
+          material="color: #00AA00; opacity: 0.15; transparent: true">
         </a-box>
 
         <a-entity id="model-node">
@@ -232,22 +329,25 @@
         </a-entity>
       </a-entity>
 
-      <!-- Oculus Touch Controller (rechts) — Trigger zum Greifen -->
+      <!-- Clipping Plane Controller -->
+      <a-entity id="clip-controller" clipping-plane></a-entity>
+
+      <!--
+        CONTROLLER (Oculus Touch, rechts)
+        Trigger       → Objekt greifen & frei bewegen
+        Joystick X    → Modell drehen
+        Joystick Y    → Zoom (Schnitt AUS) / Schnittebene verschieben (Schnitt AN)
+        A-Button      → Schnittansicht EIN / AUS
+        B-Button      → Achse wechseln: Y → X → Z → Y
+      -->
       <a-entity id="controller-right"
                 oculus-touch-controls="hand: right"
                 raycaster="objects: .grabbable; showLine: true; far: 100"
-                line="color: yellow; opacity: 1"
+                line="color: yellow; opacity: 0.8"
                 ar-steuerung>
       </a-entity>
 
-      <!--
-        Freie Hand (rechts) — NUR hand-tracking-controls, KEIN Raycaster
-        Anleitung:
-          1. Hand in den grünen Würfel bewegen → wird hellgrün
-          2. Daumen + Zeigefinger zusammendrücken (Pinch) → wird blau
-          3. Hand bewegen → Objekt folgt
-          4. Finger öffnen → loslassen
-      -->
+      <!-- Freie Hand — nur zur Darstellung -->
       <a-entity id="hand-right"
                 hand-tracking-controls="hand: right; modelStyle: dots">
       </a-entity>
