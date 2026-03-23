@@ -28,118 +28,159 @@
       });
 
       // --- KOMPONENTE 2: DIE AR-STEUERUNG ---
-      // FIX: ar-steuerung hört jetzt auf BEIDE Quellen (Controller UND Hand)
-      // indem sie Events von beiden Hand-Entities empfängt.
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
-          this.sceneEl = document.querySelector('a-scene');
-          this.rig = document.querySelector('#rig').object3D;
-          this.modelNode = document.querySelector('#model-node').object3D;
+          this.sceneEl     = document.querySelector('a-scene');
+          this.rig         = document.querySelector('#rig').object3D;
+          this.modelNode   = document.querySelector('#model-node').object3D;
+          this.grabbableEl = document.querySelector('#grab-box');
 
-          this.isGrabbed = false;
-          this.activeController = null; // Welches Entity greift gerade?
+          this.isGrabbed      = false;
+          this.activeSource   = null;   // 'controller' | 'hand'
+          this.handNearObject = false;
           this.stickX = 0;
           this.stickY = 0;
 
-          this.deadzone = 0.2;
-          this.rotateStep = 0.05;
-          this.zoomStep = 0.03;
+          this.deadzone    = 0.2;
+          this.rotateStep  = 0.05;
+          this.zoomStep    = 0.03;
           this.minDistance = 0.2;
           this.maxDistance = 4.0;
+
+          // Wie nah muss die Hand sein, um greifen zu können (Meter)
+          this.grabRadius = 0.15;
+
+          // Offset für Controller-Greifen
           this.holdOffset = new THREE.Vector3(0, -0.02, -0.18);
 
-          this.tmpControllerPos = new THREE.Vector3();
+          // Temp-Vektoren (kein Garbage in tick)
+          this.tmpHandPos        = new THREE.Vector3();
+          this.tmpRigPos         = new THREE.Vector3();
+          this.tmpControllerPos  = new THREE.Vector3();
           this.tmpControllerQuat = new THREE.Quaternion();
-          this.tmpOffset = new THREE.Vector3();
-          this.tmpCamPos = new THREE.Vector3();
-          this.tmpRigPos = new THREE.Vector3();
-          this.tmpDir = new THREE.Vector3();
-          this.tmpForward = new THREE.Vector3();
+          this.tmpOffset         = new THREE.Vector3();
+          this.tmpCamPos         = new THREE.Vector3();
+          this.tmpDir            = new THREE.Vector3();
+          this.tmpForward        = new THREE.Vector3();
 
-          // FIX: Greifen mit dem aktiven Entity als Kontext starten
-          const startGrab = (sourceEl) => {
-            const raycaster = sourceEl.components.raycaster;
+          // ── CONTROLLER (Oculus Touch) ──────────────────────────────────────
+          const controllerEl = document.querySelector('#controller-right');
+
+          controllerEl.addEventListener('triggerdown', () => {
+            const raycaster = controllerEl.components.raycaster;
             const hits = raycaster ? raycaster.intersections : [];
-            if (!hits || hits.length === 0) return;
             for (let i = 0; i < hits.length; i++) {
-              if (hits[i].object && hits[i].object.el &&
-                  hits[i].object.el.classList.contains('grabbable')) {
-                this.isGrabbed = true;
-                this.activeController = sourceEl; // merken, wer greift
+              if (hits[i].object?.el?.classList.contains('grabbable')) {
+                this.isGrabbed    = true;
+                this.activeSource = 'controller';
+                this._setBoxColor('#FF8800'); // orange = Controller hält
                 break;
               }
             }
-          };
+          });
 
-          const endGrab = () => {
-            this.isGrabbed = false;
-            this.activeController = null;
-          };
+          controllerEl.addEventListener('triggerup', () => this._endGrab());
 
-          // --- CONTROLLER (Oculus Touch) ---
-          const controllerEl = document.querySelector('#controller-right');
-          controllerEl.addEventListener('triggerdown', () => startGrab(controllerEl));
-          controllerEl.addEventListener('triggerup', endGrab);
           controllerEl.addEventListener('thumbstickmoved', (evt) => {
             this.stickX = evt.detail.x || 0;
             this.stickY = evt.detail.y || 0;
           });
 
-          // FIX: HAND-TRACKING auf separatem Entity
-          // hand-tracking-controls feuert 'pinchstarted' / 'pinchended' nur
-          // wenn das Entity NUR hand-tracking-controls hat (kein oculus-touch-controls).
+          // ── HAND-TRACKING ──────────────────────────────────────────────────
+          // Pinch nur aktivieren wenn Hand nah genug am Objekt ist
           const handEl = document.querySelector('#hand-right');
-          handEl.addEventListener('pinchstarted', () => startGrab(handEl));
-          handEl.addEventListener('pinchended', endGrab);
+
+          handEl.addEventListener('pinchstarted', () => {
+            if (this.handNearObject) {
+              this.isGrabbed    = true;
+              this.activeSource = 'hand';
+              this._setBoxColor('#0088FF'); // blau = Hand hält
+            }
+          });
+
+          handEl.addEventListener('pinchended', () => this._endGrab());
+        },
+
+        _setBoxColor: function (color) {
+          if (this.grabbableEl) {
+            this.grabbableEl.setAttribute('material',
+              `color: ${color}; opacity: 0.3; transparent: true`);
+          }
+        },
+
+        _endGrab: function () {
+          this.isGrabbed    = false;
+          this.activeSource = null;
+          this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
         },
 
         tick: function () {
+          // Kamera lazy holen
           if (!this.cameraObj) {
             const camEl = document.querySelector('a-camera');
-            if (camEl && camEl.object3D) {
-              this.cameraObj = camEl.object3D;
-            } else {
-              return;
+            if (!camEl?.object3D) return;
+            this.cameraObj = camEl.object3D;
+          }
+
+          const handEl = document.querySelector('#hand-right');
+          if (!handEl) return;
+
+          // ── HAND-NÄHE PRÜFEN ──────────────────────────────────────────────
+          if (!this.isGrabbed) {
+            handEl.object3D.getWorldPosition(this.tmpHandPos);
+            this.rig.getWorldPosition(this.tmpRigPos);
+
+            const dist    = this.tmpHandPos.distanceTo(this.tmpRigPos);
+            const wasNear = this.handNearObject;
+            this.handNearObject = dist < this.grabRadius;
+
+            if (this.handNearObject !== wasNear) {
+              this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
             }
           }
 
+          // ── JOYSTICK: Rotation & Zoom ──────────────────────────────────────
           if (!this.isGrabbed) {
-            // Rotation via Joystick
             if (Math.abs(this.stickX) > this.deadzone) {
-              this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
+              this.modelNode.rotation.y +=
+                (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
             }
 
-            // Zoom via Joystick
             if (Math.abs(this.stickY) > this.deadzone) {
               this.cameraObj.getWorldPosition(this.tmpCamPos);
               this.rig.getWorldPosition(this.tmpRigPos);
               this.tmpDir.subVectors(this.tmpRigPos, this.tmpCamPos);
-              let dist = this.tmpDir.length();
-              if (dist < 0.0001) {
+              let d = this.tmpDir.length();
+              if (d < 0.0001) {
                 this.cameraObj.getWorldDirection(this.tmpForward);
                 this.tmpDir.copy(this.tmpForward);
-                dist = 0.5;
+                d = 0.5;
               } else {
                 this.tmpDir.normalize();
               }
-              if (this.stickY > this.deadzone) {
-                dist -= this.zoomStep;
-              } else if (this.stickY < -this.deadzone) {
-                dist += this.zoomStep;
-              }
-              dist = Math.max(this.minDistance, Math.min(this.maxDistance, dist));
-              this.tmpRigPos.copy(this.tmpCamPos).add(this.tmpDir.multiplyScalar(dist));
+              d += (this.stickY > this.deadzone ? -this.zoomStep : this.zoomStep);
+              d = Math.max(this.minDistance, Math.min(this.maxDistance, d));
+              this.tmpRigPos.copy(this.tmpCamPos).add(this.tmpDir.multiplyScalar(d));
               this.rig.position.copy(this.tmpRigPos);
             }
           }
 
-          // FIX: Position vom activeController lesen (Hand ODER Controller)
-          if (this.isGrabbed && this.activeController) {
-            this.activeController.object3D.getWorldPosition(this.tmpControllerPos);
-            this.activeController.object3D.getWorldQuaternion(this.tmpControllerQuat);
-            this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
-            this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
-            this.rig.quaternion.copy(this.tmpControllerQuat);
+          // ── OBJEKT BEWEGEN ─────────────────────────────────────────────────
+          if (this.isGrabbed) {
+            if (this.activeSource === 'controller') {
+              const controllerEl = document.querySelector('#controller-right');
+              controllerEl.object3D.getWorldPosition(this.tmpControllerPos);
+              controllerEl.object3D.getWorldQuaternion(this.tmpControllerQuat);
+              this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
+              this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
+              this.rig.quaternion.copy(this.tmpControllerQuat);
+
+            } else if (this.activeSource === 'hand') {
+              handEl.object3D.getWorldPosition(this.tmpHandPos);
+              handEl.object3D.getWorldQuaternion(this.tmpControllerQuat);
+              this.rig.position.copy(this.tmpHandPos);
+              this.rig.quaternion.copy(this.tmpControllerQuat);
+            }
           }
         }
       });
@@ -158,18 +199,26 @@
 
       <a-camera position="0 1.6 0"></a-camera>
 
-      <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
-      <a-light type="directional" color="#FFF" intensity="1.5" position="-1 2 1" castShadow="true"></a-light>
+      <a-light type="ambient"     color="#FFF"    intensity="0.6"></a-light>
+      <a-light type="directional" color="#FFF"    intensity="1.5" position="-1 2 1"  castShadow="true"></a-light>
       <a-light type="directional" color="#FFDDBB" intensity="0.5" position="1 -1 -1"></a-light>
 
       <a-entity id="rig" position="0 1.2 -0.6">
+
+        <!--
+          Grab-Box: visuelles Feedback + Raycaster-Ziel für Controller
+          Farben:
+            dunkelgrün  = weit weg
+            hellgrün    = Hand in Reichweite → jetzt pinchen!
+            orange      = Controller hält
+            blau        = Hand hält
+        -->
         <a-box
+          id="grab-box"
           class="grabbable"
           position="0 0 0"
-          depth="0.5"
-          height="0.5"
-          width="0.5"
-          material="color: green; opacity: 0.2; transparent: true">
+          depth="0.5" height="0.5" width="0.5"
+          material="color: #00AA00; opacity: 0.2; transparent: true">
         </a-box>
 
         <a-entity id="model-node">
@@ -183,7 +232,7 @@
         </a-entity>
       </a-entity>
 
-      <!-- Oculus Touch Controller (rechts) -->
+      <!-- Oculus Touch Controller (rechts) — Trigger zum Greifen -->
       <a-entity id="controller-right"
                 oculus-touch-controls="hand: right"
                 raycaster="objects: .grabbable; showLine: true; far: 100"
@@ -191,10 +240,16 @@
                 ar-steuerung>
       </a-entity>
 
-      <!-- Freie Hand (rechts) - NUR hand-tracking-controls, kein oculus-touch-controls -->
+      <!--
+        Freie Hand (rechts) — NUR hand-tracking-controls, KEIN Raycaster
+        Anleitung:
+          1. Hand in den grünen Würfel bewegen → wird hellgrün
+          2. Daumen + Zeigefinger zusammendrücken (Pinch) → wird blau
+          3. Hand bewegen → Objekt folgt
+          4. Finger öffnen → loslassen
+      -->
       <a-entity id="hand-right"
-                hand-tracking-controls="hand: right; modelStyle: dots"
-                raycaster="objects: .grabbable; showLine: false; far: 100">
+                hand-tracking-controls="hand: right; modelStyle: dots">
       </a-entity>
 
     </a-scene>
