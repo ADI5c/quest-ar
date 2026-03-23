@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Controller & Freie Hand</title>
+    <title>AR Brille - Perfekte Steuerung (Getrennt)</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
@@ -11,17 +11,10 @@
         init: function () {
           this.el.addEventListener('model-loaded', (e) => {
             const model = e.detail.model;
-            
-            // Sicherheitscheck: Gibt es das Modell wirklich?
             if (!model) return;
 
             const box = new THREE.Box3().setFromObject(model);
-            
-            // Sicherheitscheck: Ist die Bounding Box leer?
-            if (box.isEmpty()) {
-              console.warn("Das 3D-Modell ist leer oder hat keine Geometrie.");
-              return;
-            }
+            if (box.isEmpty()) return;
 
             const center = new THREE.Vector3();
             box.getCenter(center);
@@ -41,7 +34,6 @@
           this.controller = this.el;
           this.sceneEl = document.querySelector('a-scene');
           
-          // Wir holen uns die Objekte erst, wenn sie wirklich da sind!
           this.rig = document.querySelector('#rig').object3D;
           this.modelNode = document.querySelector('#model-node').object3D;
 
@@ -65,7 +57,6 @@
           this.tmpDir = new THREE.Vector3();
           this.tmpForward = new THREE.Vector3();
 
-          // --- GREIFEN FUNKTION ---
           const startGrab = () => {
             const raycaster = this.controller.components.raycaster;
             const hits = raycaster ? raycaster.intersections : [];
@@ -79,20 +70,18 @@
             }
           };
 
-          // --- LOSLASSEN FUNKTION ---
           const endGrab = () => {
             this.isGrabbed = false;
           };
 
-          // 1. Hören auf den physischen Controller (Trigger)
+          // Hören auf Controller
           this.controller.addEventListener('triggerdown', startGrab);
           this.controller.addEventListener('triggerup', endGrab);
 
-          // 2. Hören auf die ECHTE HAND (Pinch / Daumen & Zeigefinger)
+          // Hören auf Hand
           this.controller.addEventListener('pinchstarted', startGrab);
           this.controller.addEventListener('pinchended', endGrab);
 
-          // Joystick Bewegung auslesen
           this.controller.addEventListener('thumbstickmoved', (evt) => {
             this.stickX = evt.detail.x || 0;
             this.stickY = evt.detail.y || 0;
@@ -100,7 +89,6 @@
         },
 
         tick: function () {
-          // SICHERHEITS-CHECK: Kamera dynamisch holen
           if (!this.cameraObj) {
             const camEl = document.querySelector('a-camera');
             if (camEl && camEl.object3D) {
@@ -111,12 +99,10 @@
           }
 
           if (!this.isGrabbed) {
-            // Rotation
             if (Math.abs(this.stickX) > this.deadzone) {
                this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
             }
 
-            // Zoom
             if (Math.abs(this.stickY) > this.deadzone) {
               this.cameraObj.getWorldPosition(this.tmpCamPos);
               this.rig.getWorldPosition(this.tmpRigPos);
@@ -188,20 +174,10 @@
             id="modell-objekt"
             gltf-model="#meinModell"
             scale="1 1 1"
-            position="-0.8 0 0.2"
+            position="-0.5 0 0.2"
             auto-center>
           </a-entity>
         </a-entity>
       </a-entity>
 
-      <a-entity id="hand"
-                oculus-touch-controls="hand: right"
-                hand-tracking-controls="hand: right"
-                raycaster="objects: .grabbable; showLine: true; far: 100"
-                line="color: yellow; opacity: 1"
-                ar-steuerung>
-      </a-entity>
-
-    </a-scene>
-  </body>
-</html>
+      <a-entity id
