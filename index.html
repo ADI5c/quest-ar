@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Absturzsicher</title>
+    <title>AR Brille - Controller & Freie Hand</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
@@ -65,7 +65,8 @@
           this.tmpDir = new THREE.Vector3();
           this.tmpForward = new THREE.Vector3();
 
-          this.controller.addEventListener('triggerdown', () => {
+          // --- GREIFEN FUNKTION ---
+          const startGrab = () => {
             const raycaster = this.controller.components.raycaster;
             const hits = raycaster ? raycaster.intersections : [];
             if (!hits || hits.length === 0) return;
@@ -76,12 +77,22 @@
                 break;
               }
             }
-          });
+          };
 
-          this.controller.addEventListener('triggerup', () => {
+          // --- LOSLASSEN FUNKTION ---
+          const endGrab = () => {
             this.isGrabbed = false;
-          });
+          };
 
+          // 1. Hören auf den physischen Controller (Trigger)
+          this.controller.addEventListener('triggerdown', startGrab);
+          this.controller.addEventListener('triggerup', endGrab);
+
+          // 2. Hören auf die ECHTE HAND (Pinch / Daumen & Zeigefinger)
+          this.controller.addEventListener('pinchstarted', startGrab);
+          this.controller.addEventListener('pinchended', endGrab);
+
+          // Joystick Bewegung auslesen
           this.controller.addEventListener('thumbstickmoved', (evt) => {
             this.stickX = evt.detail.x || 0;
             this.stickY = evt.detail.y || 0;
@@ -89,21 +100,23 @@
         },
 
         tick: function () {
-          // SICHERHEITS-CHECK: Kamera dynamisch holen, falls sie beim Start noch nicht da war
+          // SICHERHEITS-CHECK: Kamera dynamisch holen
           if (!this.cameraObj) {
             const camEl = document.querySelector('a-camera');
             if (camEl && camEl.object3D) {
               this.cameraObj = camEl.object3D;
             } else {
-              return; // Wenn die Kamera noch nicht da ist, diesen Frame überspringen
+              return; 
             }
           }
 
           if (!this.isGrabbed) {
+            // Rotation
             if (Math.abs(this.stickX) > this.deadzone) {
                this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
             }
 
+            // Zoom
             if (Math.abs(this.stickY) > this.deadzone) {
               this.cameraObj.getWorldPosition(this.tmpCamPos);
               this.rig.getWorldPosition(this.tmpRigPos);
@@ -146,19 +159,18 @@
 
   <body>
     <a-scene 
-  xr-mode-ui="XRMode: ar" 
-  renderer="colorManagement: true; antialias: true; physicallyCorrectLights: true; exposure: 1.2;">
+      xr-mode-ui="XRMode: ar" 
+      renderer="colorManagement: true; antialias: true; physicallyCorrectLights: true; exposure: 1.2;">
 
       <a-assets>
         <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
       </a-assets>
 
       <a-camera position="0 1.6 0"></a-camera>
+      
       <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
-
-<a-light type="directional" color="#FFF" intensity="1.5" position="-1 2 1" castShadow="true"></a-light>
-
-<a-light type="directional" color="#FFDDBB" intensity="0.5" position="1 -1 -1"></a-light>
+      <a-light type="directional" color="#FFF" intensity="1.5" position="-1 2 1" castShadow="true"></a-light>
+      <a-light type="directional" color="#FFDDBB" intensity="0.5" position="1 -1 -1"></a-light>
 
       <a-entity id="rig" position="0 1.2 -0.6">
         <a-box
@@ -175,19 +187,19 @@
             id="modell-objekt"
             gltf-model="#meinModell"
             scale="1 1 1"
-            position="-0.8 0 0.2"
+            position="-0.6 0 0.2"
             auto-center>
           </a-entity>
         </a-entity>
       </a-entity>
 
-  <a-entity id="hand"
-          oculus-touch-controls="hand: right"
-          hand-tracking-controls="hand: right"
-          raycaster="objects: .grabbable; showLine: true; far: 100"
-          line="color: yellow; opacity: 1"
-          ar-steuerung>
-</a-entity>
+      <a-entity id="hand"
+                oculus-touch-controls="hand: right"
+                hand-tracking-controls="hand: right"
+                raycaster="objects: .grabbable; showLine: true; far: 100"
+                line="color: yellow; opacity: 1"
+                ar-steuerung>
+      </a-entity>
 
     </a-scene>
   </body>
