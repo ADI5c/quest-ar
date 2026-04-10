@@ -2,275 +2,450 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>POPP AR Viewer</title>
+  <title>POPP AR Viewer v3</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
-
   <script>
-    // ═══════════════════════════════════════════════════════════════
-    // TOPSOLID 7.19 EXPORT-INFO (analysiert aus EntwurfARBrille.glb)
-    // ═══════════════════════════════════════════════════════════════
-    // Generator:   TOPSOLID 7.19.400.146
-    // Einheit:     METER  (nicht mm! TopSolid 7.19 exportiert in m)
-    // Scale-Faktor: 1.0   (keine Umrechnung nötig)
-    // Problem:     Modell-Koordinaten liegen bei X≈43, Y≈-2, Z≈0
-    //              → muss verschoben werden, sonst unsichtbar in AR
-    // Meshes: 26 | Nodes: 328 | Materials: 4
-    // Bauteil-Namen: "Entwurf AR Brille", "Zusammenbau <621>", etc.
-    // ═══════════════════════════════════════════════════════════════
 
-    const MODEL_FILE   = 'EntwurfARBrille.glb';
-    const SCALE_FACTOR = 1.0;   // TopSolid 7.19 → schon in Metern
-    const DEBUG        = true;
+// ═══════════════════════════════════════════════════════════════════
+// TOPSOLID 7.19 EXPORT-INFO
+// Generator: TOPSOLID 7.19.400.146  |  Einheit: METER  |  Scale: 1.0
+// Koordinaten-Offset wird automatisch herausgerechnet (auto-center-scale)
+// STEP → direkt laden NICHT empfohlen (WASM 15MB, langsam auf Quest)
+// Empfehlung: TopSolid → File > Export > glTF/GLB → laden
+// ═══════════════════════════════════════════════════════════════════
 
-    // ── KOMPONENTE: Zentrieren (Welt-Offset herausrechnen) ───────
-    AFRAME.registerComponent('auto-center-scale', {
-      init: function () {
-        this.el.addEventListener('model-loaded', (e) => {
-          const model = e.detail.model;
-          if (!model) return;
+const DEFAULT_MODEL = 'EntwurfARBrille.glb';
+const DEBUG = true;
 
-          // Skalierung (hier 1:1)
-          model.scale.setScalar(SCALE_FACTOR);
+// ── GLOBALER STATE ───────────────────────────────────────────────
+window.POPP = {
+  clipEnabled:   false,
+  clipAxis:      'x',
+  clipPos:       0.0,
+  clipFlip:      false,
+  placementMode: 'float',
+  modelSize:     new THREE.Vector3(1, 1, 1),
+  modelReady:    false,
+};
 
-          // Box NACH Scale berechnen
-          const box = new THREE.Box3().setFromObject(model);
-          if (box.isEmpty()) {
-            console.warn('[POPP AR] Modell leer.');
-            return;
-          }
+// ── Clipping auf alle Materialien des Modells anwenden ───────────
+function applyClipToScene(modelEl) {
+  if (!modelEl?.object3D) return;
+  const p = window.POPP;
 
-          const size   = new THREE.Vector3();
-          const center = new THREE.Vector3();
-          box.getSize(size);
-          box.getCenter(center);
+  // Three.js Renderer muss localClippingEnabled kennen
+  const renderer = document.querySelector('a-scene')?.renderer;
+  if (renderer) renderer.localClippingEnabled = true;
 
-          // Welt-Offset komplett herausrechnen
-          // (TopSolid platziert Baugruppen oft bei großen Koordinaten)
-          model.position.sub(center);
-
-          if (DEBUG) {
-            console.log(`[POPP AR] Modell geladen (TopSolid 7.19, Einheit: m, Scale: ${SCALE_FACTOR})`);
-            console.log(`  Breite:  ${(size.x * 1000).toFixed(0)} mm`);
-            console.log(`  Höhe:    ${(size.y * 1000).toFixed(0)} mm`);
-            console.log(`  Tiefe:   ${(size.z * 1000).toFixed(0)} mm`);
-            console.log(`  Welt-Offset war: X=${center.x.toFixed(3)} Y=${center.y.toFixed(3)} Z=${center.z.toFixed(3)}`);
-          }
-
-          // Grab-Box auf echte Modellgrösse setzen
-          const grabBox = document.querySelector('#grab-box');
-          if (grabBox) {
-            grabBox.setAttribute('width',  size.x.toFixed(4));
-            grabBox.setAttribute('height', size.y.toFixed(4));
-            grabBox.setAttribute('depth',  size.z.toFixed(4));
-          }
-        });
+  modelEl.object3D.traverse((obj) => {
+    if (!obj.isMesh || !obj.material) return;
+    const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+    mats.forEach(mat => {
+      if (p.clipEnabled) {
+        const n = p.clipAxis === 'x' ? new THREE.Vector3(1,0,0)
+                : p.clipAxis === 'y' ? new THREE.Vector3(0,1,0)
+                                     : new THREE.Vector3(0,0,1);
+        if (p.clipFlip) n.negate();
+        mat.clippingPlanes = [new THREE.Plane(n, -p.clipPos)];
+        mat.clipShadows    = true;
+      } else {
+        mat.clippingPlanes = [];
       }
+      mat.needsUpdate = true;
     });
+  });
+}
 
-    // ── KOMPONENTE: AR-Steuerung ─────────────────────────────────
-    AFRAME.registerComponent('ar-steuerung', {
-      init: function () {
-        this.rig         = document.querySelector('#rig').object3D;
-        this.modelNode   = document.querySelector('#model-node').object3D;
-        this.grabBoxEl   = document.querySelector('#grab-box');
+// ═══════════════════════════════════════════════════════════════════
+// KOMPONENTE 1: Auto-Center + Scale
+// ═══════════════════════════════════════════════════════════════════
+AFRAME.registerComponent('auto-center-scale', {
+  init: function () {
+    this.el.addEventListener('model-loaded', (e) => {
+      const model = e.detail.model;
+      if (!model) return;
 
-        this.isGrabbed      = false;
-        this.activeSource   = null;
-        this.handNearObject = false;
-        this.stickX = 0;
-        this.stickY = 0;
+      model.scale.setScalar(1.0); // TopSolid 7.19 → bereits in Metern
 
-        // Two-Hand-Zoom
-        this.isTwoHandZoom     = false;
-        this.twoHandStartDist  = 0;
-        this.twoHandStartScale = 1.0;
-        this.leftPinching      = false;
-        this.rightPinching     = false;
-        this.currentScale      = 1.0;
+      const box    = new THREE.Box3().setFromObject(model);
+      const size   = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
 
-        this.deadzone    = 0.18;
-        this.rotateStep  = 0.04;
-        this.zoomStep    = 0.025;
-        this.minDistance = 0.15;
-        this.maxDistance = 5.0;
-        this.grabRadius  = 0.15;
+      // Welt-Offset (z.B. X≈43 bei TopSolid) herausrechnen
+      model.position.sub(center);
 
-        this.holdOffset = new THREE.Vector3(0, -0.02, -0.20);
+      window.POPP.modelSize.copy(size);
+      window.POPP.modelReady = true;
 
-        // Temp-Vektoren
-        this.tmpA = new THREE.Vector3();
-        this.tmpB = new THREE.Vector3();
-        this.tmpC = new THREE.Vector3();
-        this.tmpQ = new THREE.Quaternion();
-        this.tmpDir = new THREE.Vector3();
+      if (DEBUG) console.log(
+        `[POPP AR] ${(size.x*1000)|0} × ${(size.y*1000)|0} × ${(size.z*1000)|0} mm  |  Offset: X=${center.x.toFixed(2)} Y=${center.y.toFixed(2)} Z=${center.z.toFixed(2)}`
+      );
 
-        // ── Controller (rechts) ──────────────────────────────────
-        const ctrlEl = document.querySelector('#controller-right');
+      // Grab-Box auf Modellgrösse anpassen
+      const gb = document.querySelector('#grab-box');
+      if (gb) {
+        gb.setAttribute('width',  size.x.toFixed(4));
+        gb.setAttribute('height', size.y.toFixed(4));
+        gb.setAttribute('depth',  size.z.toFixed(4));
+      }
 
-        ctrlEl.addEventListener('triggerdown', () => {
-          const rc   = ctrlEl.components.raycaster;
-          const hits = rc ? rc.intersections : [];
-          for (const h of hits) {
-            if (h.object?.el?.classList.contains('grabbable')) {
-              this.isGrabbed    = true;
-              this.activeSource = 'controller';
-              this._setBoxColor('#FF8800');
-              break;
-            }
-          }
-        });
-        ctrlEl.addEventListener('triggerup', () => this._endGrab());
-        ctrlEl.addEventListener('thumbstickmoved', (e) => {
-          this.stickX = e.detail.x || 0;
-          this.stickY = e.detail.y || 0;
-        });
+      updateClipSliderRange();
+      applyClipToScene(document.querySelector('#modell-objekt'));
+      applyPlacementMode();
 
-        // ── Hand rechts ──────────────────────────────────────────
-        const handR = document.querySelector('#hand-right');
-        handR.addEventListener('pinchstarted', () => {
-          this.rightPinching = true;
-          this._checkTwoHandOrGrab();
-        });
-        handR.addEventListener('pinchended', () => {
-          this.rightPinching = false;
-          this._endTwoHandOrGrab('right');
-        });
+      // Label aktualisieren
+      document.getElementById('size-label').textContent =
+        `${(size.x*1000)|0} × ${(size.y*1000)|0} × ${(size.z*1000)|0} mm`;
+    });
+  }
+});
 
-        // ── Hand links ───────────────────────────────────────────
-        const handL = document.querySelector('#hand-left');
-        handL.addEventListener('pinchstarted', () => {
-          this.leftPinching = true;
-          this._checkTwoHandOrGrab();
-        });
-        handL.addEventListener('pinchended', () => {
-          this.leftPinching = false;
-          this._endTwoHandOrGrab('left');
-        });
-      },
+// ═══════════════════════════════════════════════════════════════════
+// KOMPONENTE 2: AR-Steuerung
+// ═══════════════════════════════════════════════════════════════════
+AFRAME.registerComponent('ar-steuerung', {
+  init: function () {
+    this.rig       = document.querySelector('#rig').object3D;
+    this.modelNode = document.querySelector('#model-node').object3D;
+    this.grabBoxEl = document.querySelector('#grab-box');
 
-      _checkTwoHandOrGrab: function () {
-        if (this.leftPinching && this.rightPinching) {
-          this.isGrabbed         = false;
-          this.isTwoHandZoom     = true;
-          this.twoHandStartDist  = this._getTwoHandDist();
-          this.twoHandStartScale = this.currentScale;
-          this._setBoxColor('#AA00FF');
-          return;
-        }
-        if (this.rightPinching && this.handNearObject && !this.isTwoHandZoom) {
-          this.isGrabbed    = true;
-          this.activeSource = 'hand';
-          this._setBoxColor('#0088FF');
-        }
-      },
+    this.isGrabbed      = false;
+    this.activeSource   = null;
+    this.handNearObject = false;
+    this.stickX = 0;
+    this.stickY = 0;
 
-      _endTwoHandOrGrab: function (which) {
-        if (this.isTwoHandZoom) {
-          this.isTwoHandZoom = false;
-          this._setBoxColor('#00AA00');
-          return;
-        }
-        if (which === 'right') this._endGrab();
-      },
+    this.isTwoHandZoom     = false;
+    this.twoHandStartDist  = 0;
+    this.twoHandStartScale = 1.0;
+    this.leftPinching      = false;
+    this.rightPinching     = false;
+    this.currentScale      = 1.0;
 
-      _getTwoHandDist: function () {
-        const handR = document.querySelector('#hand-right');
-        const handL = document.querySelector('#hand-left');
-        if (!handR || !handL) return 0.3;
-        handR.object3D.getWorldPosition(this.tmpA);
-        handL.object3D.getWorldPosition(this.tmpB);
-        return this.tmpA.distanceTo(this.tmpB);
-      },
+    this.deadzone    = 0.18;
+    this.rotateStep  = 0.04;
+    this.zoomStep    = 0.025;
+    this.minDistance = 0.10;
+    this.maxDistance = 8.0;
+    this.grabRadius  = 0.15;
 
-      _setBoxColor: function (color) {
-        if (this.grabBoxEl) {
-          this.grabBoxEl.setAttribute('material',
-            `color: ${color}; opacity: 0.2; transparent: true`);
-        }
-      },
+    this.holdOffset = new THREE.Vector3(0, -0.02, -0.20);
+    this.tmpA  = new THREE.Vector3();
+    this.tmpB  = new THREE.Vector3();
+    this.tmpC  = new THREE.Vector3();
+    this.tmpQ  = new THREE.Quaternion();
+    this.tmpDir = new THREE.Vector3();
 
-      _endGrab: function () {
-        this.isGrabbed    = false;
-        this.activeSource = null;
-        this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
-      },
-
-      tick: function () {
-        if (!this.camObj) {
-          const camEl = document.querySelector('a-camera');
-          if (!camEl?.object3D) return;
-          this.camObj = camEl.object3D;
-        }
-
-        const handR = document.querySelector('#hand-right');
-        if (!handR) return;
-
-        // ── Hand-Nähe ────────────────────────────────────────────
-        if (!this.isGrabbed && !this.isTwoHandZoom) {
-          handR.object3D.getWorldPosition(this.tmpA);
-          this.rig.getWorldPosition(this.tmpB);
-          const dist    = this.tmpA.distanceTo(this.tmpB);
-          const wasNear = this.handNearObject;
-          this.handNearObject = dist < this.grabRadius;
-          if (this.handNearObject !== wasNear) {
-            this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
-          }
-        }
-
-        // ── Two-Hand-Zoom ────────────────────────────────────────
-        if (this.isTwoHandZoom) {
-          const curDist = this._getTwoHandDist();
-          if (this.twoHandStartDist > 0.001) {
-            const ratio = curDist / this.twoHandStartDist;
-            this.currentScale = Math.max(0.05, Math.min(20.0,
-              this.twoHandStartScale * ratio));
-            this.modelNode.scale.setScalar(this.currentScale);
-          }
-          return;
-        }
-
-        // ── Joystick: Rotation & Zoom ────────────────────────────
-        if (!this.isGrabbed) {
-          if (Math.abs(this.stickX) > this.deadzone) {
-            this.modelNode.rotation.y +=
-              (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
-          }
-          if (Math.abs(this.stickY) > this.deadzone) {
-            this.camObj.getWorldPosition(this.tmpA);
-            this.rig.getWorldPosition(this.tmpB);
-            this.tmpDir.subVectors(this.tmpB, this.tmpA);
-            let d = this.tmpDir.length();
-            if (d < 0.001) {
-              this.camObj.getWorldDirection(this.tmpDir);
-              d = 0.5;
-            } else {
-              this.tmpDir.normalize();
-            }
-            d += (this.stickY > this.deadzone ? -this.zoomStep : this.zoomStep);
-            d = Math.max(this.minDistance, Math.min(this.maxDistance, d));
-            this.rig.position.copy(this.tmpA).addScaledVector(this.tmpDir, d);
-          }
-        }
-
-        // ── Objekt bewegen ───────────────────────────────────────
-        if (this.isGrabbed) {
-          if (this.activeSource === 'controller') {
-            const ctrlEl = document.querySelector('#controller-right');
-            ctrlEl.object3D.getWorldPosition(this.tmpA);
-            ctrlEl.object3D.getWorldQuaternion(this.tmpQ);
-            this.tmpC.copy(this.holdOffset).applyQuaternion(this.tmpQ);
-            this.rig.position.copy(this.tmpA).add(this.tmpC);
-            this.rig.quaternion.copy(this.tmpQ);
-          } else if (this.activeSource === 'hand') {
-            handR.object3D.getWorldPosition(this.tmpA);
-            handR.object3D.getWorldQuaternion(this.tmpQ);
-            this.rig.position.copy(this.tmpA);
-            this.rig.quaternion.copy(this.tmpQ);
-          }
+    // Controller
+    const ctrl = document.querySelector('#controller-right');
+    ctrl.addEventListener('triggerdown', () => {
+      const hits = ctrl.components.raycaster?.intersections || [];
+      for (const h of hits) {
+        if (h.object?.el?.classList.contains('grabbable')) {
+          this.isGrabbed = true; this.activeSource = 'controller';
+          this._color('#FF8800'); break;
         }
       }
     });
+    ctrl.addEventListener('triggerup',       () => this._endGrab());
+    ctrl.addEventListener('thumbstickmoved', (e) => {
+      this.stickX = e.detail.x || 0;
+      this.stickY = e.detail.y || 0;
+    });
+
+    // Hand rechts
+    const hr = document.querySelector('#hand-right');
+    hr.addEventListener('pinchstarted', () => { this.rightPinching = true;  this._checkGrab(); });
+    hr.addEventListener('pinchended',   () => { this.rightPinching = false; this._endTwoHand('right'); });
+
+    // Hand links
+    const hl = document.querySelector('#hand-left');
+    hl.addEventListener('pinchstarted', () => { this.leftPinching = true;  this._checkGrab(); });
+    hl.addEventListener('pinchended',   () => { this.leftPinching = false; this._endTwoHand('left'); });
+  },
+
+  _checkGrab: function () {
+    if (this.leftPinching && this.rightPinching) {
+      this.isGrabbed        = false;
+      this.isTwoHandZoom    = true;
+      this.twoHandStartDist  = this._twoHandDist();
+      this.twoHandStartScale = this.currentScale;
+      this._color('#AA00FF');
+      return;
+    }
+    if (this.rightPinching && this.handNearObject && !this.isTwoHandZoom) {
+      this.isGrabbed = true; this.activeSource = 'hand';
+      this._color('#0088FF');
+    }
+  },
+
+  _endTwoHand: function (side) {
+    if (this.isTwoHandZoom) { this.isTwoHandZoom = false; this._color('#00AA00'); return; }
+    if (side === 'right') this._endGrab();
+  },
+
+  _twoHandDist: function () {
+    const r = document.querySelector('#hand-right');
+    const l = document.querySelector('#hand-left');
+    if (!r || !l) return 0.3;
+    r.object3D.getWorldPosition(this.tmpA);
+    l.object3D.getWorldPosition(this.tmpB);
+    return this.tmpA.distanceTo(this.tmpB);
+  },
+
+  _color: function (c) {
+    this.grabBoxEl?.setAttribute('material',
+      `color: ${c}; opacity: 0.18; transparent: true`);
+  },
+
+  _endGrab: function () {
+    this.isGrabbed = false; this.activeSource = null;
+    this._color(this.handNearObject ? '#00FF44' : '#00AA00');
+  },
+
+  tick: function () {
+    if (!this.camObj) {
+      const c = document.querySelector('a-camera');
+      if (!c?.object3D) return;
+      this.camObj = c.object3D;
+    }
+    const hr = document.querySelector('#hand-right');
+    if (!hr) return;
+
+    // Hand-Nähe prüfen
+    if (!this.isGrabbed && !this.isTwoHandZoom) {
+      hr.object3D.getWorldPosition(this.tmpA);
+      this.rig.getWorldPosition(this.tmpB);
+      const near = this.tmpA.distanceTo(this.tmpB) < this.grabRadius;
+      if (near !== this.handNearObject) {
+        this.handNearObject = near;
+        this._color(near ? '#00FF44' : '#00AA00');
+      }
+    }
+
+    // Two-Hand-Zoom
+    if (this.isTwoHandZoom) {
+      const d = this._twoHandDist();
+      if (this.twoHandStartDist > 0.001) {
+        this.currentScale = Math.max(0.02, Math.min(20.0,
+          this.twoHandStartScale * (d / this.twoHandStartDist)));
+        this.modelNode.scale.setScalar(this.currentScale);
+      }
+      return;
+    }
+
+    // Joystick: Rotation + Zoom
+    if (!this.isGrabbed) {
+      if (Math.abs(this.stickX) > this.deadzone)
+        this.modelNode.rotation.y += this.stickX > 0 ? this.rotateStep : -this.rotateStep;
+
+      if (Math.abs(this.stickY) > this.deadzone) {
+        this.camObj.getWorldPosition(this.tmpA);
+        this.rig.getWorldPosition(this.tmpB);
+        this.tmpDir.subVectors(this.tmpB, this.tmpA);
+        let d = this.tmpDir.length();
+        if (d < 0.001) { this.camObj.getWorldDirection(this.tmpDir); d = 0.5; }
+        else this.tmpDir.normalize();
+        d += this.stickY > this.deadzone ? -this.zoomStep : this.zoomStep;
+        d = Math.max(this.minDistance, Math.min(this.maxDistance, d));
+        this.rig.position.copy(this.tmpA).addScaledVector(this.tmpDir, d);
+      }
+    }
+
+    // Greifen & Bewegen
+    if (this.isGrabbed) {
+      if (this.activeSource === 'controller') {
+        const c = document.querySelector('#controller-right');
+        c.object3D.getWorldPosition(this.tmpA);
+        c.object3D.getWorldQuaternion(this.tmpQ);
+        this.tmpC.copy(this.holdOffset).applyQuaternion(this.tmpQ);
+        this.rig.position.copy(this.tmpA).add(this.tmpC);
+        this.rig.quaternion.copy(this.tmpQ);
+      } else if (this.activeSource === 'hand') {
+        hr.object3D.getWorldPosition(this.tmpA);
+        hr.object3D.getWorldQuaternion(this.tmpQ);
+        this.rig.position.copy(this.tmpA);
+        this.rig.quaternion.copy(this.tmpQ);
+      }
+    }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// UI-LOGIK
+// ═══════════════════════════════════════════════════════════════════
+
+function applyPlacementMode() {
+  if (!window.POPP.modelReady) return;
+  const rig = document.querySelector('#rig');
+  if (!rig) return;
+  if (window.POPP.placementMode === 'floor') {
+    const h = window.POPP.modelSize.y * 0.5;
+    rig.setAttribute('position', `0 ${h.toFixed(3)} -1.2`);
+  } else {
+    rig.setAttribute('position', '0 1.2 -0.8');
+  }
+}
+
+function setPlacement(mode) {
+  window.POPP.placementMode = mode;
+  applyPlacementMode();
+  document.getElementById('btn-float').style.opacity = mode === 'float' ? '1' : '0.4';
+  document.getElementById('btn-floor').style.opacity = mode === 'floor' ? '1' : '0.4';
+}
+
+function toggleClip() {
+  window.POPP.clipEnabled = !window.POPP.clipEnabled;
+  const btn = document.getElementById('btn-clip');
+  btn.textContent      = window.POPP.clipEnabled ? '✂ Clip AN'  : '✂ Clip AUS';
+  btn.style.background = window.POPP.clipEnabled ? 'rgba(0,160,80,0.85)' : 'rgba(0,0,0,0.6)';
+  document.getElementById('clip-controls').style.display = window.POPP.clipEnabled ? 'flex' : 'none';
+  applyClipToScene(document.querySelector('#modell-objekt'));
+}
+
+function setClipAxis(axis) {
+  window.POPP.clipAxis = axis;
+  updateClipSliderRange();
+  if (window.POPP.clipEnabled) applyClipToScene(document.querySelector('#modell-objekt'));
+  ['x','y','z'].forEach(a =>
+    document.getElementById('btn-axis-' + a).style.opacity = a === axis ? '1' : '0.4'
+  );
+}
+
+function flipClip() {
+  window.POPP.clipFlip = !window.POPP.clipFlip;
+  if (window.POPP.clipEnabled) applyClipToScene(document.querySelector('#modell-objekt'));
+}
+
+function updateClipSliderRange() {
+  const slider = document.getElementById('clip-slider');
+  if (!slider || !window.POPP.modelReady) return;
+  const s    = window.POPP.modelSize;
+  const half = (window.POPP.clipAxis === 'x' ? s.x : window.POPP.clipAxis === 'y' ? s.y : s.z) * 0.5;
+  slider.min   = (-half).toFixed(4);
+  slider.max   = ( half).toFixed(4);
+  slider.step  = (half / 200).toFixed(5);
+  slider.value = '0';
+  window.POPP.clipPos = 0;
+  document.getElementById('clip-val').textContent = '0 mm';
+}
+
+function onClipSlider(val) {
+  window.POPP.clipPos = parseFloat(val);
+  document.getElementById('clip-val').textContent = (parseFloat(val) * 1000).toFixed(0) + ' mm';
+  if (window.POPP.clipEnabled) applyClipToScene(document.querySelector('#modell-objekt'));
+}
+
+// GLB/GLTF per Datei-Picker oder Drag & Drop laden
+function loadGLB(file) {
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  const modelEl = document.querySelector('#modell-objekt');
+  // Clipping zurücksetzen vor neuem Modell
+  window.POPP.modelReady  = false;
+  window.POPP.clipEnabled = false;
+  document.getElementById('btn-clip').textContent      = '✂ Clip AUS';
+  document.getElementById('btn-clip').style.background = 'rgba(0,0,0,0.6)';
+  document.getElementById('clip-controls').style.display = 'none';
+  modelEl.setAttribute('gltf-model', url);
+  document.getElementById('filename-label').textContent = file.name;
+}
+
+function openFilePicker() {
+  document.getElementById('file-input').click();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Drag & Drop
+  document.addEventListener('dragover', e => e.preventDefault());
+  document.addEventListener('drop', e => {
+    e.preventDefault();
+    const file = e.dataTransfer?.files?.[0];
+    if (file && (file.name.endsWith('.glb') || file.name.endsWith('.gltf'))) loadGLB(file);
+  });
+});
   </script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { overflow: hidden; background: #000; font-family: system-ui, sans-serif; }
+
+    #ui-overlay {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      z-index: 999;
+      pointer-events: none;
+    }
+    #ui-overlay > * { pointer-events: all; }
+
+    .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
+
+    .btn {
+      background: rgba(0,0,0,0.65);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 8px;
+      padding: 8px 13px;
+      font-size: 13px;
+      cursor: pointer;
+      user-select: none;
+      white-space: nowrap;
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+      transition: opacity 0.12s, transform 0.08s;
+    }
+    .btn:active { transform: scale(0.95); }
+
+    #size-label, #filename-label {
+      color: rgba(255,255,255,0.45);
+      font-size: 11px;
+    }
+
+    #clip-controls {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 7px;
+      background: rgba(0,0,0,0.65);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 10px;
+      padding: 10px 18px;
+      backdrop-filter: blur(6px);
+    }
+
+    #clip-slider { width: 220px; accent-color: #00ccff; cursor: pointer; }
+    #clip-val { color: #00ccff; font-size: 13px; font-variant-numeric: tabular-nums; min-width: 60px; text-align: center; }
+
+    #legend {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      background: rgba(0,0,0,0.6);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 11px;
+      color: #fff;
+      line-height: 1.9;
+      backdrop-filter: blur(4px);
+      z-index: 999;
+    }
+    .dot {
+      display: inline-block;
+      width: 9px; height: 9px;
+      border-radius: 50%;
+      margin-right: 5px;
+      vertical-align: middle;
+    }
+  </style>
 </head>
 
 <body>
@@ -289,23 +464,9 @@
     <a-light type="directional" color="#FFF"    intensity="1.4" position="-1 2 1" castShadow="true"></a-light>
     <a-light type="directional" color="#FFDDBB" intensity="0.4" position="1 -1 -1"></a-light>
 
-    <!--
-      RIG startet 0.8m vor dir, auf Brusthöhe.
-      Grab-Box passt sich nach model-loaded automatisch auf Modellgrösse an.
-
-      Statusfarben der Box:
-        dunkelgrün  = Hand zu weit weg
-        hellgrün    = Hand in Reichweite → pinchen!
-        orange      = Controller hält
-        blau        = rechte Hand hält
-        lila        = Two-Hand-Zoom aktiv
-    -->
     <a-entity id="rig" position="0 1.2 -0.8">
 
-      <a-box
-        id="grab-box"
-        class="grabbable"
-        position="0 0 0"
+      <a-box id="grab-box" class="grabbable"
         width="1" height="1" depth="1"
         material="color: #00AA00; opacity: 0.18; transparent: true"
         wireframe="true">
@@ -322,7 +483,6 @@
 
     </a-entity>
 
-    <!-- Controller rechts: Trigger=Greifen, Joystick=Rotation+Zoom -->
     <a-entity id="controller-right"
               oculus-touch-controls="hand: right"
               raycaster="objects: .grabbable; showLine: true; far: 50"
@@ -330,16 +490,62 @@
               ar-steuerung>
     </a-entity>
 
-    <!-- Hand rechts: Pinch=Greifen, Two-Hand=Zoom -->
     <a-entity id="hand-right"
               hand-tracking-controls="hand: right; modelStyle: dots">
     </a-entity>
 
-    <!-- Hand links: nur für Two-Hand-Zoom -->
     <a-entity id="hand-left"
               hand-tracking-controls="hand: left; modelStyle: dots">
     </a-entity>
 
   </a-scene>
+
+  <!-- Farb-Legende -->
+  <div id="legend">
+    <div><span class="dot" style="background:#00AA00"></span>Hand zu weit</div>
+    <div><span class="dot" style="background:#00FF44"></span>Hand nah → pinchen</div>
+    <div><span class="dot" style="background:#FF8800"></span>Controller hält</div>
+    <div><span class="dot" style="background:#0088FF"></span>Hand hält</div>
+    <div><span class="dot" style="background:#AA00FF"></span>Two-Hand-Zoom</div>
+  </div>
+
+  <!-- Overlay UI -->
+  <div id="ui-overlay">
+
+    <!-- Datei laden -->
+    <div class="row">
+      <button class="btn" onclick="openFilePicker()">📂 GLB laden</button>
+      <span id="filename-label">EntwurfARBrille.glb</span>
+    </div>
+    <input id="file-input" type="file" accept=".glb,.gltf"
+      style="display:none" onchange="loadGLB(this.files[0])">
+    <div class="row">
+      <span id="size-label" style="color:rgba(255,255,255,0.35); font-size:11px;">— Modell lädt —</span>
+    </div>
+
+    <!-- Platzierung -->
+    <div class="row">
+      <button id="btn-float" class="btn" style="opacity:1"   onclick="setPlacement('float')">🪂 Schwebend</button>
+      <button id="btn-floor" class="btn" style="opacity:0.4" onclick="setPlacement('floor')">🏗 Boden 1:1</button>
+    </div>
+
+    <!-- Clipping -->
+    <div class="row">
+      <button id="btn-clip" class="btn" onclick="toggleClip()">✂ Clip AUS</button>
+    </div>
+
+    <div id="clip-controls">
+      <div class="row">
+        <button id="btn-axis-x" class="btn" style="opacity:1"   onclick="setClipAxis('x')">Achse X</button>
+        <button id="btn-axis-y" class="btn" style="opacity:0.4" onclick="setClipAxis('y')">Achse Y</button>
+        <button id="btn-axis-z" class="btn" style="opacity:0.4" onclick="setClipAxis('z')">Achse Z</button>
+        <button class="btn" onclick="flipClip()">⇄ Flip</button>
+      </div>
+      <input id="clip-slider" type="range" min="-0.5" max="0.5" step="0.005" value="0"
+        oninput="onClipSlider(this.value)">
+      <span id="clip-val">0 mm</span>
+    </div>
+
+  </div>
 </body>
 </html>
