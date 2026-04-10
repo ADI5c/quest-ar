@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>POPP AR Viewer v5</title>
+  <title>POPP AR Viewer v6</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script>
 
@@ -22,7 +22,6 @@ window.POPP = {
   menuOpen:      true,
 };
 
-// ── Clipping ─────────────────────────────────────────────────────
 function applyClip() {
   const modelEl = document.querySelector('#modell-objekt');
   if (!modelEl?.object3D) return;
@@ -48,7 +47,6 @@ function applyClip() {
   });
 }
 
-// ── Placement ────────────────────────────────────────────────────
 function applyPlacement() {
   if (!window.POPP.modelReady) return;
   const rig = document.querySelector('#rig');
@@ -61,74 +59,7 @@ function applyPlacement() {
   }
 }
 
-// ── Aktionen ─────────────────────────────────────────────────────
-window.POPP_action = {
-
-  toggleMenu: function() {
-    window.POPP.menuOpen = !window.POPP.menuOpen;
-    const panel = document.getElementById('menu-panel');
-    if (panel) panel.setAttribute('visible', window.POPP.menuOpen);
-    const btn = document.getElementById('menu-toggle-text');
-    if (btn) btn.setAttribute('value', window.POPP.menuOpen ? '✕' : '☰');
-  },
-
-  togglePlacement: function() {
-    window.POPP.placementMode = window.POPP.placementMode === 'float' ? 'floor' : 'float';
-    applyPlacement();
-    const t = document.getElementById('place-text');
-    if (t) t.setAttribute('value', window.POPP.placementMode === 'floor' ? 'Schwebend' : 'Boden 1:1');
-  },
-
-  toggleClip: function() {
-    window.POPP.clipEnabled = !window.POPP.clipEnabled;
-    applyClip();
-    const t  = document.getElementById('clip-text');
-    const bg = document.getElementById('clip-bg');
-    if (t)  t.setAttribute('value', window.POPP.clipEnabled ? 'Clip AUS' : 'Clip AN');
-    if (bg) bg.setAttribute('color', window.POPP.clipEnabled ? '#005522' : '#111133');
-    // Clip-Untermenü ein/ausblenden
-    const sub = document.getElementById('clip-submenu');
-    if (sub) sub.setAttribute('visible', window.POPP.clipEnabled);
-  },
-
-  setAxis: function(axis) {
-    window.POPP.clipAxis = axis;
-    // Slider-Range neu berechnen
-    const s = window.POPP.modelSize;
-    window.POPP._clipHalf = (axis==='x'?s.x : axis==='y'?s.y : s.z) * 0.5;
-    window.POPP.clipPos = 0;
-    if (window.POPP.clipEnabled) applyClip();
-    updateSliderLabel(0);
-    // Achsen-Buttons Farbe
-    ['x','y','z'].forEach(a => {
-      const bg = document.getElementById('axis-bg-'+a);
-      if (bg) bg.setAttribute('color', a===axis ? '#003366' : '#111133');
-    });
-  },
-
-  flipClip: function() {
-    window.POPP.clipFlip = !window.POPP.clipFlip;
-    if (window.POPP.clipEnabled) applyClip();
-  },
-
-  sliderPlus: function()  { moveSlider( 1); },
-  sliderMinus: function() { moveSlider(-1); },
-};
-
-function moveSlider(dir) {
-  const half  = window.POPP._clipHalf || window.POPP.modelSize.x * 0.5;
-  const step  = half / 40;
-  window.POPP.clipPos = Math.max(-half, Math.min(half, window.POPP.clipPos + dir * step));
-  if (window.POPP.clipEnabled) applyClip();
-  updateSliderLabel(window.POPP.clipPos);
-}
-
-function updateSliderLabel(val) {
-  const t = document.getElementById('slider-val-text');
-  if (t) t.setAttribute('value', (val*1000).toFixed(0)+' mm');
-}
-
-// ── Auto-Center + Scale ──────────────────────────────────────────
+// ── AUTO-CENTER + SCALE ──────────────────────────────────────────
 AFRAME.registerComponent('auto-center-scale', {
   init: function() {
     this.el.addEventListener('model-loaded', e => {
@@ -143,87 +74,146 @@ AFRAME.registerComponent('auto-center-scale', {
       window.POPP._clipHalf = size.x * 0.5;
       window.POPP.modelReady = true;
       const gb = document.querySelector('#grab-box');
-      if (gb) { gb.setAttribute('width', size.x.toFixed(4)); gb.setAttribute('height', size.y.toFixed(4)); gb.setAttribute('depth', size.z.toFixed(4)); }
-      applyPlacement(); applyClip();
-      const lbl = document.getElementById('model-size-text');
-      if (lbl) lbl.setAttribute('value', `${(size.x*1000)|0}×${(size.y*1000)|0}×${(size.z*1000)|0} mm`);
-      console.log(`[POPP AR] ${(size.x*1000)|0}×${(size.y*1000)|0}×${(size.z*1000)|0} mm`);
+      if (gb) {
+        gb.setAttribute('width',  size.x.toFixed(4));
+        gb.setAttribute('height', size.y.toFixed(4));
+        gb.setAttribute('depth',  size.z.toFixed(4));
+      }
+      applyPlacement();
+      applyClip();
+      setMenuText('info-text', `${(size.x*1000)|0} x ${(size.y*1000)|0} x ${(size.z*1000)|0} mm`);
     });
   }
 });
 
-// ── Head-Locked Menu: folgt der Kamera ──────────────────────────
+// ── HEAD-LOCKED ──────────────────────────────────────────────────
 AFRAME.registerComponent('head-locked', {
   schema: {
-    distance: {type:'number', default: 1.2},
-    offsetY:  {type:'number', default: -0.25},
-    offsetX:  {type:'number', default:  0.38},
+    dist:    { type:'number', default: 1.0 },
+    offsetX: { type:'number', default: 0.30 },
+    offsetY: { type:'number', default: -0.20 },
   },
   init: function() {
-    this.camDir  = new THREE.Vector3();
-    this.camPos  = new THREE.Vector3();
-    this.right   = new THREE.Vector3();
-    this.up      = new THREE.Vector3(0,1,0);
-    this.target  = new THREE.Vector3();
-    this.smoothPos = new THREE.Vector3();
-    this.smoothQuat = new THREE.Quaternion();
-    this.initialized = false;
+    this.smooth = new THREE.Vector3();
+    this.ready  = false;
+    this.camDir = new THREE.Vector3();
+    this.camPos = new THREE.Vector3();
+    this.right  = new THREE.Vector3();
+    this.up     = new THREE.Vector3(0,1,0);
+    this.target = new THREE.Vector3();
   },
   tick: function() {
     const cam = document.querySelector('a-camera')?.object3D;
     if (!cam) return;
-
     cam.getWorldPosition(this.camPos);
     cam.getWorldDirection(this.camDir);
-
-    // Rechts-Vektor (für offset nach rechts/links)
     this.right.crossVectors(this.camDir, this.up).normalize();
-
-    // Zielposition: vor + rechts + runter
     this.target.copy(this.camPos)
-      .addScaledVector(this.camDir,  this.data.distance)
-      .addScaledVector(this.right,   this.data.offsetX)
-      .addScaledVector(this.up,      this.data.offsetY);
-
-    // Smooth folgen (Lerp, damit es nicht ruckelt)
-    if (!this.initialized) {
-      this.smoothPos.copy(this.target);
-      this.initialized = true;
-    }
-    this.smoothPos.lerp(this.target, 0.06);
-    this.el.object3D.position.copy(this.smoothPos);
-
-    // Panel immer zur Kamera ausrichten
+      .addScaledVector(this.camDir, this.data.dist)
+      .addScaledVector(this.right,  this.data.offsetX)
+      .addScaledVector(this.up,     this.data.offsetY);
+    if (!this.ready) { this.smooth.copy(this.target); this.ready = true; }
+    this.smooth.lerp(this.target, 0.07);
+    this.el.object3D.position.copy(this.smooth);
     this.el.object3D.lookAt(this.camPos);
   }
 });
 
-// ── 3D-Button-Komponente ─────────────────────────────────────────
-AFRAME.registerComponent('btn3d', {
-  schema: { action: {type:'string', default:''} },
+// ── MENU-BUTTON ──────────────────────────────────────────────────
+AFRAME.registerComponent('menu-button', {
+  schema: { action: { type:'string', default:'' } },
   init: function() {
     this.el.classList.add('menu-btn');
-    this.hovered = false;
+    this.bg = this.el.querySelector('.btn-bg');
+    this.defaultColor = this.bg ? this.bg.getAttribute('color') : '#1a1a3a';
 
     this.el.addEventListener('mouseenter', () => {
-      this.hovered = true;
-      const bg = this.el.querySelector('[data-bg]');
-      if (bg) bg.setAttribute('color', '#1a3a6a');
+      if (this.bg) this.bg.setAttribute('color', '#2255aa');
     });
     this.el.addEventListener('mouseleave', () => {
-      this.hovered = false;
-      const bg = this.el.querySelector('[data-bg]');
-      if (bg) bg.setAttribute('color', bg.getAttribute('data-default-color') || '#111133');
+      if (this.bg) this.bg.setAttribute('color', this.activeColor || this.defaultColor);
     });
     this.el.addEventListener('click', () => {
-      const parts = this.data.action.split(':');
-      const fn = window.POPP_action[parts[0]];
-      if (typeof fn === 'function') fn(parts[1]);
+      handleAction(this.data.action);
     });
+  },
+  setActive: function(color) {
+    this.activeColor = color;
+    if (this.bg) this.bg.setAttribute('color', color);
+  },
+  setInactive: function() {
+    this.activeColor = null;
+    if (this.bg) this.bg.setAttribute('color', this.defaultColor);
   }
 });
 
-// ── AR-Steuerung ─────────────────────────────────────────────────
+function setMenuText(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.setAttribute('value', val);
+}
+
+function handleAction(action) {
+  switch(action) {
+    case 'toggleMenu': {
+      window.POPP.menuOpen = !window.POPP.menuOpen;
+      document.getElementById('main-panel').setAttribute('visible', window.POPP.menuOpen);
+      setMenuText('hamburger-text', window.POPP.menuOpen ? 'X' : '=');
+      break;
+    }
+    case 'togglePlacement': {
+      window.POPP.placementMode = window.POPP.placementMode === 'float' ? 'floor' : 'float';
+      applyPlacement();
+      const isFloor = window.POPP.placementMode === 'floor';
+      setMenuText('place-text', isFloor ? 'Schwebend' : 'Boden 1:1');
+      const comp = document.getElementById('btn-place')?.components['menu-button'];
+      if (comp) isFloor ? comp.setActive('#003322') : comp.setInactive();
+      break;
+    }
+    case 'toggleClip': {
+      window.POPP.clipEnabled = !window.POPP.clipEnabled;
+      applyClip();
+      const on = window.POPP.clipEnabled;
+      setMenuText('clip-text', on ? 'Clip AUS' : 'Clip AN');
+      const comp = document.getElementById('btn-clip')?.components['menu-button'];
+      if (comp) on ? comp.setActive('#003322') : comp.setInactive();
+      document.getElementById('clip-sub').setAttribute('visible', on);
+      break;
+    }
+    case 'axisX': setClipAxis('x'); break;
+    case 'axisY': setClipAxis('y'); break;
+    case 'axisZ': setClipAxis('z'); break;
+    case 'sliderPlus':  moveSlider( 1); break;
+    case 'sliderMinus': moveSlider(-1); break;
+    case 'flipClip': {
+      window.POPP.clipFlip = !window.POPP.clipFlip;
+      if (window.POPP.clipEnabled) applyClip();
+      break;
+    }
+  }
+}
+
+function setClipAxis(axis) {
+  window.POPP.clipAxis = axis;
+  const s = window.POPP.modelSize;
+  window.POPP._clipHalf = (axis==='x'?s.x : axis==='y'?s.y : s.z) * 0.5;
+  window.POPP.clipPos = 0;
+  if (window.POPP.clipEnabled) applyClip();
+  setMenuText('slider-val', '0 mm');
+  ['x','y','z'].forEach(a => {
+    const comp = document.getElementById('btn-axis-'+a)?.components['menu-button'];
+    if (comp) a===axis ? comp.setActive('#003366') : comp.setInactive();
+  });
+}
+
+function moveSlider(dir) {
+  const half = window.POPP._clipHalf || window.POPP.modelSize.x * 0.5;
+  const step = Math.max(0.001, half / 50);
+  window.POPP.clipPos = Math.max(-half, Math.min(half, window.POPP.clipPos + dir * step));
+  if (window.POPP.clipEnabled) applyClip();
+  setMenuText('slider-val', (window.POPP.clipPos*1000).toFixed(0)+' mm');
+}
+
+// ── AR-STEUERUNG ─────────────────────────────────────────────────
 AFRAME.registerComponent('ar-steuerung', {
   init: function() {
     this.rig       = document.querySelector('#rig').object3D;
@@ -243,17 +233,16 @@ AFRAME.registerComponent('ar-steuerung', {
 
     const ctrl = document.querySelector('#controller-right');
     ctrl.addEventListener('triggerdown', () => {
-      // Nur grabben wenn NICHT auf Menu-Button gezielt
       const hits = ctrl.components.raycaster?.intersections || [];
-      const onMenu = hits.some(h => h.object?.el?.classList.contains('menu-btn'));
-      if (onMenu) return;
+      // Wenn Menu-Button getroffen → kein Grab
+      if (hits.some(h => h.object?.el?.classList.contains('menu-btn'))) return;
       for (const h of hits) {
         if (h.object?.el?.classList.contains('grabbable')) {
           this.isGrabbed=true; this.activeSource='controller'; this._col('#FF8800'); break;
         }
       }
     });
-    ctrl.addEventListener('triggerup', () => this._endGrab());
+    ctrl.addEventListener('triggerup',       () => this._endGrab());
     ctrl.addEventListener('thumbstickmoved', e => { this.stickX=e.detail.x||0; this.stickY=e.detail.y||0; });
 
     const hr = document.querySelector('#hand-right');
@@ -263,7 +252,6 @@ AFRAME.registerComponent('ar-steuerung', {
     hl.addEventListener('pinchstarted', () => { this.leftPinching=true;  this._checkGrab(); });
     hl.addEventListener('pinchended',   () => { this.leftPinching=false; this._endTwo('left'); });
   },
-
   _checkGrab: function() {
     if (this.leftPinching && this.rightPinching) {
       this.isGrabbed=false; this.isTwoHandZoom=true;
@@ -286,7 +274,6 @@ AFRAME.registerComponent('ar-steuerung', {
   },
   _col: function(c) { this.grabBoxEl?.setAttribute('material',`color:${c};opacity:0.18;transparent:true`); },
   _endGrab: function() { this.isGrabbed=false; this.activeSource=null; this._col(this.handNearObject?'#00FF44':'#00AA00'); },
-
   tick: function() {
     if (!this.camObj) { const c=document.querySelector('a-camera'); if(!c?.object3D) return; this.camObj=c.object3D; }
     const hr=document.querySelector('#hand-right'); if(!hr) return;
@@ -296,7 +283,6 @@ AFRAME.registerComponent('ar-steuerung', {
       const near=this.tA.distanceTo(this.tB)<this.grabRadius;
       if(near!==this.handNearObject){this.handNearObject=near;this._col(near?'#00FF44':'#00AA00');}
     }
-
     if (this.isTwoHandZoom) {
       const d=this._twoDist();
       if(this.twoHandStartDist>0.001){
@@ -305,7 +291,6 @@ AFRAME.registerComponent('ar-steuerung', {
       }
       return;
     }
-
     if (!this.isGrabbed) {
       if(Math.abs(this.stickX)>this.deadzone)
         this.modelNode.rotation.y+=this.stickX>0?this.rotateStep:-this.rotateStep;
@@ -319,7 +304,6 @@ AFRAME.registerComponent('ar-steuerung', {
         this.rig.position.copy(this.tA).addScaledVector(this.tDir,d);
       }
     }
-
     if (this.isGrabbed) {
       if(this.activeSource==='controller'){
         const c=document.querySelector('#controller-right');
@@ -333,227 +317,195 @@ AFRAME.registerComponent('ar-steuerung', {
     }
   }
 });
-
-// setAxis via action string mit Parameter
-window.POPP_action.setAxis = function(axis) { window.POPP_action.setAxis_inner(axis); };
   </script>
-
   <style>
-    *{box-sizing:border-box;margin:0;padding:0;}
-    body{overflow:hidden;background:#000;font-family:system-ui,sans-serif;}
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { overflow:hidden; background:#000; }
   </style>
 </head>
 <body>
 
-  <a-scene
-    xr-mode-ui="XRMode: ar"
-    webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking;"
-    renderer="colorManagement:true;antialias:true;physicallyCorrectLights:true;exposure:1.2;">
+<a-scene
+  xr-mode-ui="XRMode: ar"
+  webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking;"
+  renderer="colorManagement:true; antialias:true; physicallyCorrectLights:true; exposure:1.2;">
 
-    <a-assets>
-      <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
-    </a-assets>
+  <a-assets>
+    <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
+  </a-assets>
 
-    <a-camera position="0 1.6 0"></a-camera>
+  <a-camera position="0 1.6 0"></a-camera>
 
-    <a-light type="ambient"     color="#FFF"    intensity="0.5"></a-light>
-    <a-light type="directional" color="#FFF"    intensity="1.4" position="-1 2 1" castShadow="true"></a-light>
-    <a-light type="directional" color="#FFDDBB" intensity="0.4" position="1 -1 -1"></a-light>
+  <a-light type="ambient"     color="#fff"    intensity="0.5"></a-light>
+  <a-light type="directional" color="#fff"    intensity="1.4" position="-1 2 1" castShadow="true"></a-light>
+  <a-light type="directional" color="#ffddbb" intensity="0.4" position="1 -1 -1"></a-light>
 
-    <!-- ═══════════════════════════════════════════════════════
-         MODELL-RIG
-    ═══════════════════════════════════════════════════════ -->
-    <a-entity id="rig" position="0 1.2 -0.8">
-      <a-box id="grab-box" class="grabbable"
-        width="1" height="1" depth="1"
-        material="color:#00AA00;opacity:0.18;transparent:true"
-        wireframe="true">
-      </a-box>
-      <a-entity id="model-node">
-        <a-entity id="modell-objekt" gltf-model="#meinModell" position="0 0 0" auto-center-scale></a-entity>
-      </a-entity>
+  <!-- MODELL -->
+  <a-entity id="rig" position="0 1.2 -0.8">
+    <a-box id="grab-box" class="grabbable"
+      width="1" height="1" depth="1"
+      material="color:#00AA00; opacity:0.18; transparent:true"
+      wireframe="true">
+    </a-box>
+    <a-entity id="model-node">
+      <a-entity id="modell-objekt" gltf-model="#meinModell" auto-center-scale></a-entity>
     </a-entity>
+  </a-entity>
 
-    <!-- ═══════════════════════════════════════════════════════
-         HEAD-LOCKED MENU
-         Folgt dem Kopf, unten rechts im Sichtfeld.
-         Raycaster vom Controller → Trigger = Klick.
+  <!-- ═══════════════════════════════════════════════════════════
+       MENU — head-locked, unten rechts im Sichtfeld
+       Aufbau: alles nur a-plane + a-text + menu-button Komponente
+       Keine externen Abhängigkeiten, kein a-rounded.
+  ═══════════════════════════════════════════════════════════════ -->
 
-         Positionen der Buttons (Y nach unten = negativer Wert):
-           Titel          +0.165
-           Modellinfo     +0.120
-           Trennlinie     +0.085
-           [☰ Menü]       Toggle oben rechts, immer sichtbar
-           [Platzierung]  +0.045
-           [Clip AN/AUS]  -0.005
-           -- Clip-Untermenü (nur wenn Clip aktiv) --
-           [X] [Y] [Z]    -0.060
-           [−] [mm] [+]   -0.105
-           [Flip]         -0.148
-    ═══════════════════════════════════════════════════════ -->
-
-    <!-- Toggle-Button: immer sichtbar, öffnet/schliesst Panel -->
-    <a-entity head-locked="distance:1.1; offsetY:-0.18; offsetX:0.46">
-      <a-entity btn3d="action:toggleMenu" class="menu-btn">
-        <a-plane data-bg data-default-color="#0a0a1a"
-          width="0.055" height="0.055" color="#0a0a1a"
-          material="opacity:0.92;transparent:true">
-        </a-plane>
-        <a-text id="menu-toggle-text" value="✕" align="center" color="white"
-          width="0.12" position="0 0 0.003">
-        </a-text>
-      </a-entity>
-    </a-entity>
-
-    <!-- Haupt-Panel -->
-    <a-entity id="menu-panel" head-locked="distance:1.1; offsetY:-0.25; offsetX:0.34" visible="true">
-
-      <!-- Panel-Hintergrund -->
-      <a-plane
-        width="0.28" height="0.42"
-        color="#0a0a1a" opacity="0.92" transparent="true"
-        material="side:double">
+  <!-- Hamburger / Close Toggle — immer sichtbar -->
+  <a-entity head-locked="dist:1.0; offsetX:0.44; offsetY:-0.14">
+    <a-entity id="btn-hamburger" menu-button="action:toggleMenu">
+      <a-plane class="btn-bg" width="0.055" height="0.055" color="#0d0d22"
+               material="opacity:0.95; transparent:true; side:double">
       </a-plane>
-
-      <!-- Titel -->
-      <a-text value="POPP AR" align="center" color="#4af"
-        width="0.22" position="0 0.165 0.003" font="exo2bold">
+      <a-text id="hamburger-text" value="X" align="center" color="#ffffff"
+              width="0.13" position="0 0 0.003">
       </a-text>
-
-      <!-- Modellgrösse -->
-      <a-text id="model-size-text" value="lädt…" align="center"
-        color="rgba(255,255,255,0.45)" width="0.20" position="0 0.128 0.003">
-      </a-text>
-
-      <!-- Trennlinie -->
-      <a-plane width="0.24" height="0.002" color="#223" position="0 0.098 0.003"></a-plane>
-
-      <!-- Button: Platzierung -->
-      <a-entity btn3d="action:togglePlacement" position="0 0.055 0.003">
-        <a-plane data-bg data-default-color="#111133"
-          width="0.26" height="0.046" color="#111133"
-          material="opacity:0.95;transparent:true" class="menu-btn">
-        </a-plane>
-        <a-text id="place-text" value="Boden 1:1" align="center" color="white"
-          width="0.20" position="0 0 0.003">
-        </a-text>
-      </a-entity>
-
-      <!-- Button: Clip -->
-      <a-entity btn3d="action:toggleClip" position="0 0.000 0.003">
-        <a-plane id="clip-bg" data-bg data-default-color="#111133"
-          width="0.26" height="0.046" color="#111133"
-          material="opacity:0.95;transparent:true" class="menu-btn">
-        </a-plane>
-        <a-text id="clip-text" value="Clip AN" align="center" color="white"
-          width="0.20" position="0 0 0.003">
-        </a-text>
-      </a-entity>
-
-      <!-- Clip-Untermenü (nur sichtbar wenn Clip aktiv) -->
-      <a-entity id="clip-submenu" visible="false" position="0 0 0">
-
-        <!-- Achsen X Y Z -->
-        <a-entity btn3d="action:setAxis:x" position="-0.085 -0.052 0.003">
-          <a-plane id="axis-bg-x" data-bg data-default-color="#111133"
-            width="0.077" height="0.038" color="#111133"
-            material="opacity:0.95;transparent:true" class="menu-btn">
-          </a-plane>
-          <a-text value="X" align="center" color="#f84" width="0.10" position="0 0 0.003"></a-text>
-        </a-entity>
-
-        <a-entity btn3d="action:setAxis:y" position="0 -0.052 0.003">
-          <a-plane id="axis-bg-y" data-bg data-default-color="#111133"
-            width="0.077" height="0.038" color="#111133"
-            material="opacity:0.95;transparent:true" class="menu-btn">
-          </a-plane>
-          <a-text value="Y" align="center" color="#4f8" width="0.10" position="0 0 0.003"></a-text>
-        </a-entity>
-
-        <a-entity btn3d="action:setAxis:z" position="0.085 -0.052 0.003">
-          <a-plane id="axis-bg-z" data-bg data-default-color="#111133"
-            width="0.077" height="0.038" color="#111133"
-            material="opacity:0.95;transparent:true" class="menu-btn">
-          </a-plane>
-          <a-text value="Z" align="center" color="#48f" width="0.10" position="0 0 0.003"></a-text>
-        </a-entity>
-
-        <!-- Slider: − | mm-Wert | + -->
-        <a-entity btn3d="action:sliderMinus" position="-0.096 -0.098 0.003">
-          <a-plane data-bg data-default-color="#111133"
-            width="0.055" height="0.038" color="#111133"
-            material="opacity:0.95;transparent:true" class="menu-btn">
-          </a-plane>
-          <a-text value="−" align="center" color="white" width="0.12" position="0 0 0.003"></a-text>
-        </a-entity>
-
-        <a-text id="slider-val-text" value="0 mm" align="center"
-          color="#0cf" width="0.18" position="0 -0.098 0.003">
-        </a-text>
-
-        <a-entity btn3d="action:sliderPlus" position="0.096 -0.098 0.003">
-          <a-plane data-bg data-default-color="#111133"
-            width="0.055" height="0.038" color="#111133"
-            material="opacity:0.95;transparent:true" class="menu-btn">
-          </a-plane>
-          <a-text value="+" align="center" color="white" width="0.12" position="0 0 0.003"></a-text>
-        </a-entity>
-
-        <!-- Flip -->
-        <a-entity btn3d="action:flipClip" position="0 -0.143 0.003">
-          <a-plane data-bg data-default-color="#111133"
-            width="0.26" height="0.038" color="#111133"
-            material="opacity:0.95;transparent:true" class="menu-btn">
-          </a-plane>
-          <a-text value="⇄ Flip Richtung" align="center" color="white" width="0.20" position="0 0 0.003"></a-text>
-        </a-entity>
-
-      </a-entity>
-      <!-- /clip-submenu -->
-
     </a-entity>
-    <!-- /menu-panel -->
+  </a-entity>
 
-    <!-- ═══════════════════════════════════════════════════════
-         CONTROLLER + HÄNDE
-    ═══════════════════════════════════════════════════════ -->
+  <!-- Haupt-Panel -->
+  <a-entity id="main-panel" head-locked="dist:1.0; offsetX:0.30; offsetY:-0.27" visible="true">
 
-    <!--
-      Raycaster: .grabbable für Modell-Greifen, .menu-btn für Panel-Klicks
-      Beide Klassen werden erkannt, Trigger löst je nach Treffer aus.
-    -->
-    <a-entity id="controller-right"
-              oculus-touch-controls="hand: right"
-              raycaster="objects: .grabbable, .menu-btn; showLine: true; far: 20; lineColor: yellow; lineOpacity: 0.7"
-              ar-steuerung>
+    <!-- Hintergrund -->
+    <a-plane width="0.30" height="0.20" color="#0d0d22"
+             material="opacity:0.92; transparent:true; side:double"
+             position="0 0 -0.001">
+    </a-plane>
+
+    <!-- Titel -->
+    <a-text value="POPP AR" align="center" color="#44aaff"
+            width="0.24" position="0 0.075 0">
+    </a-text>
+
+    <!-- Info: Modellgrösse -->
+    <a-text id="info-text" value="lädt..." align="center" color="#aaaaaa"
+            width="0.22" position="0 0.042 0">
+    </a-text>
+
+    <!-- Trennlinie -->
+    <a-plane width="0.28" height="0.003" color="#334466" position="0 0.018 0"></a-plane>
+
+    <!-- Button: Platzierung -->
+    <a-entity id="btn-place" menu-button="action:togglePlacement" position="0 -0.018 0">
+      <a-plane class="btn-bg" width="0.28" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text id="place-text" value="Boden 1:1" align="center" color="#ffffff"
+              width="0.22" position="0 0 0.004">
+      </a-text>
     </a-entity>
 
-    <a-entity id="hand-right" hand-tracking-controls="hand: right; modelStyle: dots"></a-entity>
-    <a-entity id="hand-left"  hand-tracking-controls="hand: left;  modelStyle: dots"></a-entity>
+    <!-- Button: Clip AN/AUS -->
+    <a-entity id="btn-clip" menu-button="action:toggleClip" position="0 -0.062 0">
+      <a-plane class="btn-bg" width="0.28" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text id="clip-text" value="Clip AN" align="center" color="#ffffff"
+              width="0.22" position="0 0 0.004">
+      </a-text>
+    </a-entity>
 
-  </a-scene>
+  </a-entity>
 
-  <script>
-    // setAxis mit Parameter aus action-string "setAxis:x"
-    const _origAction = window.POPP_action;
-    window.POPP_action.setAxis_inner = function(axis) {
-      if (!axis) return;
-      window.POPP.clipAxis = axis;
-      const s = window.POPP.modelSize;
-      window.POPP._clipHalf = (axis==='x'?s.x : axis==='y'?s.y : s.z) * 0.5;
-      window.POPP.clipPos = 0;
-      if (window.POPP.clipEnabled) applyClip();
-      updateSliderLabel(0);
-      ['x','y','z'].forEach(a => {
-        const bg = document.getElementById('axis-bg-'+a);
-        if (bg) bg.setAttribute('color', a===axis ? '#003366' : '#111133');
-      });
-    };
-    // Überschreibe setAxis damit der Parameter durchkommt
-    window.POPP_action['setAxis:x'] = () => window.POPP_action.setAxis_inner('x');
-    window.POPP_action['setAxis:y'] = () => window.POPP_action.setAxis_inner('y');
-    window.POPP_action['setAxis:z'] = () => window.POPP_action.setAxis_inner('z');
-  </script>
+  <!-- Clip-Untermenü — erscheint unter Haupt-Panel wenn Clip aktiv -->
+  <a-entity id="clip-sub" head-locked="dist:1.0; offsetX:0.30; offsetY:-0.47" visible="false">
+
+    <a-plane width="0.30" height="0.20" color="#0d0d22"
+             material="opacity:0.92; transparent:true; side:double"
+             position="0 0 -0.001">
+    </a-plane>
+
+    <!-- Achse X -->
+    <a-entity id="btn-axis-x" menu-button="action:axisX" position="-0.092 0.068 0">
+      <a-plane class="btn-bg" width="0.088" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text value="X" align="center" color="#ff8844" width="0.12" position="0 0 0.004"></a-text>
+    </a-entity>
+
+    <!-- Achse Y -->
+    <a-entity id="btn-axis-y" menu-button="action:axisY" position="0 0.068 0">
+      <a-plane class="btn-bg" width="0.088" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text value="Y" align="center" color="#44ff88" width="0.12" position="0 0 0.004"></a-text>
+    </a-entity>
+
+    <!-- Achse Z -->
+    <a-entity id="btn-axis-z" menu-button="action:axisZ" position="0.092 0.068 0">
+      <a-plane class="btn-bg" width="0.088" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text value="Z" align="center" color="#4488ff" width="0.12" position="0 0 0.004"></a-text>
+    </a-entity>
+
+    <!-- Slider: Minus -->
+    <a-entity menu-button="action:sliderMinus" position="-0.104 0.020 0">
+      <a-plane class="btn-bg" width="0.064" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text value="&lt;" align="center" color="#ffffff" width="0.12" position="0 0 0.004"></a-text>
+    </a-entity>
+
+    <!-- Slider-Wert -->
+    <a-text id="slider-val" value="0 mm" align="center" color="#00ccff"
+            width="0.18" position="0 0.020 0">
+    </a-text>
+
+    <!-- Slider: Plus -->
+    <a-entity menu-button="action:sliderPlus" position="0.104 0.020 0">
+      <a-plane class="btn-bg" width="0.064" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text value="&gt;" align="center" color="#ffffff" width="0.12" position="0 0 0.004"></a-text>
+    </a-entity>
+
+    <!-- Flip -->
+    <a-entity menu-button="action:flipClip" position="0 -0.030 0">
+      <a-plane class="btn-bg" width="0.28" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text value="Flip Richtung" align="center" color="#ffffff"
+              width="0.22" position="0 0 0.004">
+      </a-text>
+    </a-entity>
+
+    <!-- Schnitt-Wert grösser ändern (x5) -->
+    <a-entity menu-button="action:sliderMinus" position="-0.104 -0.076 0">
+      <a-plane class="btn-bg" width="0.064" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text value="&lt;&lt;" align="center" color="#aaaaaa" width="0.10" position="0 0 0.004"></a-text>
+    </a-entity>
+    <a-text value="Grob" align="center" color="#666688" width="0.14" position="0 -0.076 0"></a-text>
+    <a-entity menu-button="action:sliderPlus" position="0.104 -0.076 0">
+      <a-plane class="btn-bg" width="0.064" height="0.038" color="#1a1a3a"
+               material="opacity:0.97; transparent:true; side:double">
+      </a-plane>
+      <a-text value="&gt;&gt;" align="center" color="#aaaaaa" width="0.10" position="0 0 0.004"></a-text>
+    </a-entity>
+
+  </a-entity>
+  <!-- /clip-sub -->
+
+  <!-- CONTROLLER -->
+  <a-entity id="controller-right"
+            oculus-touch-controls="hand: right"
+            raycaster="objects: .grabbable, .menu-btn; showLine:true; far:20; lineColor:yellow; lineOpacity:0.8"
+            ar-steuerung>
+  </a-entity>
+
+  <a-entity id="hand-right" hand-tracking-controls="hand:right; modelStyle:dots"></a-entity>
+  <a-entity id="hand-left"  hand-tracking-controls="hand:left;  modelStyle:dots"></a-entity>
+
+</a-scene>
 
 </body>
 </html>
