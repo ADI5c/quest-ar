@@ -2,112 +2,106 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>POPP AR Viewer v2</title>
+  <title>POPP AR Viewer</title>
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
   <script>
     // ═══════════════════════════════════════════════════════════════
-    // KONSTANTEN
+    // TOPSOLID 7.19 EXPORT-INFO (analysiert aus EntwurfARBrille.glb)
+    // ═══════════════════════════════════════════════════════════════
+    // Generator:   TOPSOLID 7.19.400.146
+    // Einheit:     METER  (nicht mm! TopSolid 7.19 exportiert in m)
+    // Scale-Faktor: 1.0   (keine Umrechnung nötig)
+    // Problem:     Modell-Koordinaten liegen bei X≈43, Y≈-2, Z≈0
+    //              → muss verschoben werden, sonst unsichtbar in AR
+    // Meshes: 26 | Nodes: 328 | Materials: 4
+    // Bauteil-Namen: "Entwurf AR Brille", "Zusammenbau <621>", etc.
     // ═══════════════════════════════════════════════════════════════
 
-    // WICHTIG: Passe diesen Wert an deinen CAD-Export an!
-    // TopSolid / SolidWorks exportieren GLB meistens in MILLIMETERN.
-    // WebXR / Three.js arbeitet in METERN.
-    // Wenn dein Modell 1000mm gross ist → soll es 1m = 1.0 gross erscheinen.
-    // → SCALE_FACTOR = 0.001
-    // Wenn dein GLB bereits in Metern ist → SCALE_FACTOR = 1.0
-    const SCALE_FACTOR = 0.001; // mm → m  (für TopSolid Standard-Export)
+    const MODEL_FILE   = 'EntwurfARBrille.glb';
+    const SCALE_FACTOR = 1.0;   // TopSolid 7.19 → schon in Metern
+    const DEBUG        = true;
 
-    // Debug: setzt du auf true, siehst du Konsolenmeldungen zur Skalierung
-    const DEBUG = true;
-
-    // ═══════════════════════════════════════════════════════════════
-    // KOMPONENTE 1: MODELL ZENTRIEREN + SKALIEREN
-    // ═══════════════════════════════════════════════════════════════
+    // ── KOMPONENTE: Zentrieren (Welt-Offset herausrechnen) ───────
     AFRAME.registerComponent('auto-center-scale', {
       init: function () {
         this.el.addEventListener('model-loaded', (e) => {
           const model = e.detail.model;
           if (!model) return;
 
-          // Erst skalieren, dann Box berechnen (Reihenfolge wichtig!)
+          // Skalierung (hier 1:1)
           model.scale.setScalar(SCALE_FACTOR);
 
+          // Box NACH Scale berechnen
           const box = new THREE.Box3().setFromObject(model);
           if (box.isEmpty()) {
-            console.warn('[POPP AR] Modell ist leer.');
+            console.warn('[POPP AR] Modell leer.');
             return;
           }
 
-          const size = new THREE.Vector3();
-          box.getSize(size);
-
-          if (DEBUG) {
-            console.log(`[POPP AR] Modell-Grösse nach Skalierung:
-  Breite:  ${(size.x * 1000).toFixed(1)} mm
-  Höhe:    ${(size.y * 1000).toFixed(1)} mm
-  Tiefe:   ${(size.z * 1000).toFixed(1)} mm
-  (= ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m)`);
-          }
-
+          const size   = new THREE.Vector3();
           const center = new THREE.Vector3();
+          box.getSize(size);
           box.getCenter(center);
+
+          // Welt-Offset komplett herausrechnen
+          // (TopSolid platziert Baugruppen oft bei großen Koordinaten)
           model.position.sub(center);
 
-          // Grüne Debug-Box mit echter Modellgrösse aktualisieren
-          const grabBox = document.querySelector('#grab-box');
-          if (grabBox) {
-            grabBox.setAttribute('depth',  size.z.toFixed(4));
-            grabBox.setAttribute('height', size.y.toFixed(4));
-            grabBox.setAttribute('width',  size.x.toFixed(4));
+          if (DEBUG) {
+            console.log(`[POPP AR] Modell geladen (TopSolid 7.19, Einheit: m, Scale: ${SCALE_FACTOR})`);
+            console.log(`  Breite:  ${(size.x * 1000).toFixed(0)} mm`);
+            console.log(`  Höhe:    ${(size.y * 1000).toFixed(0)} mm`);
+            console.log(`  Tiefe:   ${(size.z * 1000).toFixed(0)} mm`);
+            console.log(`  Welt-Offset war: X=${center.x.toFixed(3)} Y=${center.y.toFixed(3)} Z=${center.z.toFixed(3)}`);
           }
 
-          console.log('[POPP AR] Modell zentriert und skaliert (1:1 mm→m).');
+          // Grab-Box auf echte Modellgrösse setzen
+          const grabBox = document.querySelector('#grab-box');
+          if (grabBox) {
+            grabBox.setAttribute('width',  size.x.toFixed(4));
+            grabBox.setAttribute('height', size.y.toFixed(4));
+            grabBox.setAttribute('depth',  size.z.toFixed(4));
+          }
         });
       }
     });
 
-    // ═══════════════════════════════════════════════════════════════
-    // KOMPONENTE 2: AR STEUERUNG (Controller + Hand + Two-Hand-Zoom)
-    // ═══════════════════════════════════════════════════════════════
+    // ── KOMPONENTE: AR-Steuerung ─────────────────────────────────
     AFRAME.registerComponent('ar-steuerung', {
       init: function () {
-        this.sceneEl   = document.querySelector('a-scene');
-        this.rig       = document.querySelector('#rig').object3D;
-        this.modelNode = document.querySelector('#model-node').object3D;
-        this.grabBoxEl = document.querySelector('#grab-box');
+        this.rig         = document.querySelector('#rig').object3D;
+        this.modelNode   = document.querySelector('#model-node').object3D;
+        this.grabBoxEl   = document.querySelector('#grab-box');
 
-        // ── State ────────────────────────────────────────────────
-        this.isGrabbed       = false;
-        this.activeSource    = null;   // 'controller' | 'hand'
-        this.handNearObject  = false;
-        this.stickX          = 0;
-        this.stickY          = 0;
+        this.isGrabbed      = false;
+        this.activeSource   = null;
+        this.handNearObject = false;
+        this.stickX = 0;
+        this.stickY = 0;
 
-        // Two-Hand-Zoom State
+        // Two-Hand-Zoom
         this.isTwoHandZoom     = false;
         this.twoHandStartDist  = 0;
         this.twoHandStartScale = 1.0;
         this.leftPinching      = false;
         this.rightPinching     = false;
-        this.currentScale      = 1.0;   // aktueller Modell-Scale-Multiplikator
+        this.currentScale      = 1.0;
 
-        // ── Konfiguration ────────────────────────────────────────
         this.deadzone    = 0.18;
         this.rotateStep  = 0.04;
         this.zoomStep    = 0.025;
         this.minDistance = 0.15;
         this.maxDistance = 5.0;
-        this.grabRadius  = 0.12;   // Pinch-Radius in Metern
+        this.grabRadius  = 0.15;
 
-        // Wie weit rechts/unter der Hand das Modell beim Controller-Greifen hängt
         this.holdOffset = new THREE.Vector3(0, -0.02, -0.20);
 
-        // ── Temp-Vektoren (kein GC im tick) ─────────────────────
-        this.tmpA   = new THREE.Vector3();
-        this.tmpB   = new THREE.Vector3();
-        this.tmpC   = new THREE.Vector3();
-        this.tmpQ   = new THREE.Quaternion();
+        // Temp-Vektoren
+        this.tmpA = new THREE.Vector3();
+        this.tmpB = new THREE.Vector3();
+        this.tmpC = new THREE.Vector3();
+        this.tmpQ = new THREE.Quaternion();
         this.tmpDir = new THREE.Vector3();
 
         // ── Controller (rechts) ──────────────────────────────────
@@ -125,9 +119,7 @@
             }
           }
         });
-
         ctrlEl.addEventListener('triggerup', () => this._endGrab());
-
         ctrlEl.addEventListener('thumbstickmoved', (e) => {
           this.stickX = e.detail.x || 0;
           this.stickY = e.detail.y || 0;
@@ -135,12 +127,10 @@
 
         // ── Hand rechts ──────────────────────────────────────────
         const handR = document.querySelector('#hand-right');
-
         handR.addEventListener('pinchstarted', () => {
           this.rightPinching = true;
           this._checkTwoHandOrGrab();
         });
-
         handR.addEventListener('pinchended', () => {
           this.rightPinching = false;
           this._endTwoHandOrGrab('right');
@@ -148,30 +138,25 @@
 
         // ── Hand links ───────────────────────────────────────────
         const handL = document.querySelector('#hand-left');
-
         handL.addEventListener('pinchstarted', () => {
           this.leftPinching = true;
           this._checkTwoHandOrGrab();
         });
-
         handL.addEventListener('pinchended', () => {
           this.leftPinching = false;
           this._endTwoHandOrGrab('left');
         });
       },
 
-      // ── Two-Hand-Zoom starten oder normalen Grab ─────────────
       _checkTwoHandOrGrab: function () {
         if (this.leftPinching && this.rightPinching) {
-          // Beide Hände → Two-Hand-Scale
-          this.isGrabbed      = false;
-          this.isTwoHandZoom  = true;
+          this.isGrabbed         = false;
+          this.isTwoHandZoom     = true;
           this.twoHandStartDist  = this._getTwoHandDist();
           this.twoHandStartScale = this.currentScale;
-          this._setBoxColor('#AA00FF'); // lila = Two-Hand-Zoom
+          this._setBoxColor('#AA00FF');
           return;
         }
-        // Nur eine Hand → normaler Pinch-Grab (wenn nah genug)
         if (this.rightPinching && this.handNearObject && !this.isTwoHandZoom) {
           this.isGrabbed    = true;
           this.activeSource = 'hand';
@@ -200,7 +185,7 @@
       _setBoxColor: function (color) {
         if (this.grabBoxEl) {
           this.grabBoxEl.setAttribute('material',
-            `color: ${color}; opacity: 0.25; transparent: true`);
+            `color: ${color}; opacity: 0.2; transparent: true`);
         }
       },
 
@@ -210,9 +195,7 @@
         this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
       },
 
-      // ── tick: läuft jeden Frame ──────────────────────────────
       tick: function () {
-        // Kamera lazy
         if (!this.camObj) {
           const camEl = document.querySelector('a-camera');
           if (!camEl?.object3D) return;
@@ -222,12 +205,11 @@
         const handR = document.querySelector('#hand-right');
         if (!handR) return;
 
-        // ── HAND-NÄHE PRÜFEN ──────────────────────────────────
-        // Vergleich mit Rig-Position (Modellmittelpunkt) – korrekt
+        // ── Hand-Nähe ────────────────────────────────────────────
         if (!this.isGrabbed && !this.isTwoHandZoom) {
           handR.object3D.getWorldPosition(this.tmpA);
           this.rig.getWorldPosition(this.tmpB);
-          const dist   = this.tmpA.distanceTo(this.tmpB);
+          const dist    = this.tmpA.distanceTo(this.tmpB);
           const wasNear = this.handNearObject;
           this.handNearObject = dist < this.grabRadius;
           if (this.handNearObject !== wasNear) {
@@ -235,25 +217,24 @@
           }
         }
 
-        // ── TWO-HAND-ZOOM ──────────────────────────────────────
+        // ── Two-Hand-Zoom ────────────────────────────────────────
         if (this.isTwoHandZoom) {
           const curDist = this._getTwoHandDist();
           if (this.twoHandStartDist > 0.001) {
             const ratio = curDist / this.twoHandStartDist;
-            this.currentScale = Math.max(0.05, Math.min(10.0,
+            this.currentScale = Math.max(0.05, Math.min(20.0,
               this.twoHandStartScale * ratio));
             this.modelNode.scale.setScalar(this.currentScale);
           }
-          return; // während Two-Hand-Zoom nichts anderes
+          return;
         }
 
-        // ── JOYSTICK: Rotation & Zoom ─────────────────────────
+        // ── Joystick: Rotation & Zoom ────────────────────────────
         if (!this.isGrabbed) {
           if (Math.abs(this.stickX) > this.deadzone) {
             this.modelNode.rotation.y +=
               (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
           }
-
           if (Math.abs(this.stickY) > this.deadzone) {
             this.camObj.getWorldPosition(this.tmpA);
             this.rig.getWorldPosition(this.tmpB);
@@ -271,7 +252,7 @@
           }
         }
 
-        // ── OBJEKT BEWEGEN ────────────────────────────────────
+        // ── Objekt bewegen ───────────────────────────────────────
         if (this.isGrabbed) {
           if (this.activeSource === 'controller') {
             const ctrlEl = document.querySelector('#controller-right');
@@ -280,7 +261,6 @@
             this.tmpC.copy(this.holdOffset).applyQuaternion(this.tmpQ);
             this.rig.position.copy(this.tmpA).add(this.tmpC);
             this.rig.quaternion.copy(this.tmpQ);
-
           } else if (this.activeSource === 'hand') {
             handR.object3D.getWorldPosition(this.tmpA);
             handR.object3D.getWorldQuaternion(this.tmpQ);
@@ -294,56 +274,39 @@
 </head>
 
 <body>
-  <!--
-    WEBXR SESSION:
-    - requiredFeatures: local-floor  → Boden-Referenz (wichtig für 1:1 Höhenwahrnehmung)
-    - optionalFeatures: hand-tracking → freie Hände ohne Controller
-  -->
   <a-scene
     xr-mode-ui="XRMode: ar"
     webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking;"
     renderer="colorManagement: true; antialias: true; physicallyCorrectLights: true; exposure: 1.2;">
 
     <a-assets>
-      <!--
-        Deine GLB-Datei hier eintragen.
-        Wenn du mehrere Modelle testen willst, füge mehrere asset-items ein
-        und wechsle die id="meinModell" unten am gltf-model.
-      -->
       <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
     </a-assets>
 
     <a-camera position="0 1.6 0"></a-camera>
 
-    <!-- Beleuchtung: HDR-ähnlich mit zwei Richtungslichtern -->
     <a-light type="ambient"     color="#FFF"    intensity="0.5"></a-light>
-    <a-light type="directional" color="#FFF"    intensity="1.4" position="-1 2 1"  castShadow="true"></a-light>
+    <a-light type="directional" color="#FFF"    intensity="1.4" position="-1 2 1" castShadow="true"></a-light>
     <a-light type="directional" color="#FFDDBB" intensity="0.4" position="1 -1 -1"></a-light>
 
     <!--
-      RIG = Halter des Modells in der Welt
-      position="0 1.2 -0.6" = 60cm vor dem Nutzer, 1.20m hoch
-      Passe position an deinen Startpunkt an.
+      RIG startet 0.8m vor dir, auf Brusthöhe.
+      Grab-Box passt sich nach model-loaded automatisch auf Modellgrösse an.
+
+      Statusfarben der Box:
+        dunkelgrün  = Hand zu weit weg
+        hellgrün    = Hand in Reichweite → pinchen!
+        orange      = Controller hält
+        blau        = rechte Hand hält
+        lila        = Two-Hand-Zoom aktiv
     -->
-    <a-entity id="rig" position="0 1.2 -0.6">
+    <a-entity id="rig" position="0 1.2 -0.8">
 
-      <!--
-        GRAB-BOX:
-          Farben als Statusanzeige:
-            dunkelgrün  (#00AA00) = Modell liegt im Raum, Hand zu weit weg
-            hellgrün    (#00FF44) = Hand in Reichweite → jetzt pinchen!
-            orange      (#FF8800) = Controller hält
-            blau        (#0088FF) = rechte Hand hält
-            lila        (#AA00FF) = Two-Hand-Zoom aktiv
-
-          Grösse wird automatisch vom auto-center-scale auf Modellgrösse gesetzt.
-          Fallback: 0.5×0.5×0.5 m
-      -->
       <a-box
         id="grab-box"
         class="grabbable"
         position="0 0 0"
-        depth="0.5" height="0.5" width="0.5"
+        width="1" height="1" depth="1"
         material="color: #00AA00; opacity: 0.18; transparent: true"
         wireframe="true">
       </a-box>
@@ -354,20 +317,12 @@
           gltf-model="#meinModell"
           position="0 0 0"
           auto-center-scale>
-          <!--
-            HINWEIS: scale wird von auto-center-scale via model.scale.setScalar()
-            gesetzt – NICHT via A-Frame scale-Attribut, damit die Box-Berechnung
-            danach die skalierten Dimensionen korrekt ausliest.
-          -->
         </a-entity>
       </a-entity>
+
     </a-entity>
 
-    <!--
-      CONTROLLER (rechts) – Oculus Touch
-      Trigger = Greifen / Loslassen
-      Joystick = Rotation (links/rechts) + Zoom (vor/zurück)
-    -->
+    <!-- Controller rechts: Trigger=Greifen, Joystick=Rotation+Zoom -->
     <a-entity id="controller-right"
               oculus-touch-controls="hand: right"
               raycaster="objects: .grabbable; showLine: true; far: 50"
@@ -375,18 +330,12 @@
               ar-steuerung>
     </a-entity>
 
-    <!--
-      HAND rechts – freie Hand ohne Controller
-      Pinch (Daumen + Zeigefinger) = Greifen / Loslassen
-      Two-Hand-Pinch (beide Hände gleichzeitig) = Zoom / Skalieren
-    -->
+    <!-- Hand rechts: Pinch=Greifen, Two-Hand=Zoom -->
     <a-entity id="hand-right"
               hand-tracking-controls="hand: right; modelStyle: dots">
     </a-entity>
 
-    <!--
-      HAND links – nur für Two-Hand-Zoom benötigt
-    -->
+    <!-- Hand links: nur für Two-Hand-Zoom -->
     <a-entity id="hand-left"
               hand-tracking-controls="hand: left; modelStyle: dots">
     </a-entity>
