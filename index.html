@@ -1,199 +1,396 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>AR Brille - Perfekte Steuerung (Getrennt)</title>
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<head>
+  <meta charset="utf-8">
+  <title>POPP AR Viewer v2</title>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
-    <script>
-      // --- KOMPONENTE 1: DAS MODELL AUTOMATISCH ZENTRIEREN ---
-      AFRAME.registerComponent('auto-center', {
-        init: function () {
-          this.el.addEventListener('model-loaded', (e) => {
-            const model = e.detail.model;
-            if (!model) return;
+  <script>
+    // ═══════════════════════════════════════════════════════════════
+    // KONSTANTEN
+    // ═══════════════════════════════════════════════════════════════
 
-            const box = new THREE.Box3().setFromObject(model);
-            if (box.isEmpty()) return;
+    // WICHTIG: Passe diesen Wert an deinen CAD-Export an!
+    // TopSolid / SolidWorks exportieren GLB meistens in MILLIMETERN.
+    // WebXR / Three.js arbeitet in METERN.
+    // Wenn dein Modell 1000mm gross ist → soll es 1m = 1.0 gross erscheinen.
+    // → SCALE_FACTOR = 0.001
+    // Wenn dein GLB bereits in Metern ist → SCALE_FACTOR = 1.0
+    const SCALE_FACTOR = 0.001; // mm → m  (für TopSolid Standard-Export)
 
-            const center = new THREE.Vector3();
-            box.getCenter(center);
-            
-            model.position.x -= center.x;
-            model.position.y -= center.y;
-            model.position.z -= center.z;
-            
-            console.log("Modell wurde erfolgreich zentriert!");
-          });
-        }
-      });
+    // Debug: setzt du auf true, siehst du Konsolenmeldungen zur Skalierung
+    const DEBUG = true;
 
-      // --- KOMPONENTE 2: DIE AR-STEUERUNG ---
-      AFRAME.registerComponent('ar-steuerung', {
-        init: function () {
-          this.controller = this.el;
-          this.sceneEl = document.querySelector('a-scene');
-          
-          this.rig = document.querySelector('#rig').object3D;
-          this.modelNode = document.querySelector('#model-node').object3D;
+    // ═══════════════════════════════════════════════════════════════
+    // KOMPONENTE 1: MODELL ZENTRIEREN + SKALIEREN
+    // ═══════════════════════════════════════════════════════════════
+    AFRAME.registerComponent('auto-center-scale', {
+      init: function () {
+        this.el.addEventListener('model-loaded', (e) => {
+          const model = e.detail.model;
+          if (!model) return;
 
-          this.isGrabbed = false;
-          this.stickX = 0;
-          this.stickY = 0;
+          // Erst skalieren, dann Box berechnen (Reihenfolge wichtig!)
+          model.scale.setScalar(SCALE_FACTOR);
 
-          this.deadzone = 0.2;
-          this.rotateStep = 0.05; 
-          this.zoomStep = 0.03;   
+          const box = new THREE.Box3().setFromObject(model);
+          if (box.isEmpty()) {
+            console.warn('[POPP AR] Modell ist leer.');
+            return;
+          }
 
-          this.minDistance = 0.2;
-          this.maxDistance = 4.0;
-          this.holdOffset = new THREE.Vector3(0, -0.02, -0.18);
+          const size = new THREE.Vector3();
+          box.getSize(size);
 
-          this.tmpControllerPos = new THREE.Vector3();
-          this.tmpControllerQuat = new THREE.Quaternion();
-          this.tmpOffset = new THREE.Vector3();
-          this.tmpCamPos = new THREE.Vector3();
-          this.tmpRigPos = new THREE.Vector3();
-          this.tmpDir = new THREE.Vector3();
-          this.tmpForward = new THREE.Vector3();
+          if (DEBUG) {
+            console.log(`[POPP AR] Modell-Grösse nach Skalierung:
+  Breite:  ${(size.x * 1000).toFixed(1)} mm
+  Höhe:    ${(size.y * 1000).toFixed(1)} mm
+  Tiefe:   ${(size.z * 1000).toFixed(1)} mm
+  (= ${size.x.toFixed(3)} m × ${size.y.toFixed(3)} m × ${size.z.toFixed(3)} m)`);
+          }
 
-          const startGrab = () => {
-            const raycaster = this.controller.components.raycaster;
-            const hits = raycaster ? raycaster.intersections : [];
-            if (!hits || hits.length === 0) return;
+          const center = new THREE.Vector3();
+          box.getCenter(center);
+          model.position.sub(center);
 
-            for (let i = 0; i < hits.length; i++) {
-              if (hits[i].object && hits[i].object.el && hits[i].object.el.classList.contains('grabbable')) {
-                this.isGrabbed = true;
-                break;
-              }
+          // Grüne Debug-Box mit echter Modellgrösse aktualisieren
+          const grabBox = document.querySelector('#grab-box');
+          if (grabBox) {
+            grabBox.setAttribute('depth',  size.z.toFixed(4));
+            grabBox.setAttribute('height', size.y.toFixed(4));
+            grabBox.setAttribute('width',  size.x.toFixed(4));
+          }
+
+          console.log('[POPP AR] Modell zentriert und skaliert (1:1 mm→m).');
+        });
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // KOMPONENTE 2: AR STEUERUNG (Controller + Hand + Two-Hand-Zoom)
+    // ═══════════════════════════════════════════════════════════════
+    AFRAME.registerComponent('ar-steuerung', {
+      init: function () {
+        this.sceneEl   = document.querySelector('a-scene');
+        this.rig       = document.querySelector('#rig').object3D;
+        this.modelNode = document.querySelector('#model-node').object3D;
+        this.grabBoxEl = document.querySelector('#grab-box');
+
+        // ── State ────────────────────────────────────────────────
+        this.isGrabbed       = false;
+        this.activeSource    = null;   // 'controller' | 'hand'
+        this.handNearObject  = false;
+        this.stickX          = 0;
+        this.stickY          = 0;
+
+        // Two-Hand-Zoom State
+        this.isTwoHandZoom     = false;
+        this.twoHandStartDist  = 0;
+        this.twoHandStartScale = 1.0;
+        this.leftPinching      = false;
+        this.rightPinching     = false;
+        this.currentScale      = 1.0;   // aktueller Modell-Scale-Multiplikator
+
+        // ── Konfiguration ────────────────────────────────────────
+        this.deadzone    = 0.18;
+        this.rotateStep  = 0.04;
+        this.zoomStep    = 0.025;
+        this.minDistance = 0.15;
+        this.maxDistance = 5.0;
+        this.grabRadius  = 0.12;   // Pinch-Radius in Metern
+
+        // Wie weit rechts/unter der Hand das Modell beim Controller-Greifen hängt
+        this.holdOffset = new THREE.Vector3(0, -0.02, -0.20);
+
+        // ── Temp-Vektoren (kein GC im tick) ─────────────────────
+        this.tmpA   = new THREE.Vector3();
+        this.tmpB   = new THREE.Vector3();
+        this.tmpC   = new THREE.Vector3();
+        this.tmpQ   = new THREE.Quaternion();
+        this.tmpDir = new THREE.Vector3();
+
+        // ── Controller (rechts) ──────────────────────────────────
+        const ctrlEl = document.querySelector('#controller-right');
+
+        ctrlEl.addEventListener('triggerdown', () => {
+          const rc   = ctrlEl.components.raycaster;
+          const hits = rc ? rc.intersections : [];
+          for (const h of hits) {
+            if (h.object?.el?.classList.contains('grabbable')) {
+              this.isGrabbed    = true;
+              this.activeSource = 'controller';
+              this._setBoxColor('#FF8800');
+              break;
             }
-          };
+          }
+        });
 
-          const endGrab = () => {
-            this.isGrabbed = false;
-          };
+        ctrlEl.addEventListener('triggerup', () => this._endGrab());
 
-          // Hören auf Controller
-          this.controller.addEventListener('triggerdown', startGrab);
-          this.controller.addEventListener('triggerup', endGrab);
+        ctrlEl.addEventListener('thumbstickmoved', (e) => {
+          this.stickX = e.detail.x || 0;
+          this.stickY = e.detail.y || 0;
+        });
 
-          // Hören auf Hand
-          this.controller.addEventListener('pinchstarted', startGrab);
-          this.controller.addEventListener('pinchended', endGrab);
+        // ── Hand rechts ──────────────────────────────────────────
+        const handR = document.querySelector('#hand-right');
 
-          this.controller.addEventListener('thumbstickmoved', (evt) => {
-            this.stickX = evt.detail.x || 0;
-            this.stickY = evt.detail.y || 0;
-          });
-        },
+        handR.addEventListener('pinchstarted', () => {
+          this.rightPinching = true;
+          this._checkTwoHandOrGrab();
+        });
 
-        tick: function () {
-          if (!this.cameraObj) {
-            const camEl = document.querySelector('a-camera');
-            if (camEl && camEl.object3D) {
-              this.cameraObj = camEl.object3D;
+        handR.addEventListener('pinchended', () => {
+          this.rightPinching = false;
+          this._endTwoHandOrGrab('right');
+        });
+
+        // ── Hand links ───────────────────────────────────────────
+        const handL = document.querySelector('#hand-left');
+
+        handL.addEventListener('pinchstarted', () => {
+          this.leftPinching = true;
+          this._checkTwoHandOrGrab();
+        });
+
+        handL.addEventListener('pinchended', () => {
+          this.leftPinching = false;
+          this._endTwoHandOrGrab('left');
+        });
+      },
+
+      // ── Two-Hand-Zoom starten oder normalen Grab ─────────────
+      _checkTwoHandOrGrab: function () {
+        if (this.leftPinching && this.rightPinching) {
+          // Beide Hände → Two-Hand-Scale
+          this.isGrabbed      = false;
+          this.isTwoHandZoom  = true;
+          this.twoHandStartDist  = this._getTwoHandDist();
+          this.twoHandStartScale = this.currentScale;
+          this._setBoxColor('#AA00FF'); // lila = Two-Hand-Zoom
+          return;
+        }
+        // Nur eine Hand → normaler Pinch-Grab (wenn nah genug)
+        if (this.rightPinching && this.handNearObject && !this.isTwoHandZoom) {
+          this.isGrabbed    = true;
+          this.activeSource = 'hand';
+          this._setBoxColor('#0088FF');
+        }
+      },
+
+      _endTwoHandOrGrab: function (which) {
+        if (this.isTwoHandZoom) {
+          this.isTwoHandZoom = false;
+          this._setBoxColor('#00AA00');
+          return;
+        }
+        if (which === 'right') this._endGrab();
+      },
+
+      _getTwoHandDist: function () {
+        const handR = document.querySelector('#hand-right');
+        const handL = document.querySelector('#hand-left');
+        if (!handR || !handL) return 0.3;
+        handR.object3D.getWorldPosition(this.tmpA);
+        handL.object3D.getWorldPosition(this.tmpB);
+        return this.tmpA.distanceTo(this.tmpB);
+      },
+
+      _setBoxColor: function (color) {
+        if (this.grabBoxEl) {
+          this.grabBoxEl.setAttribute('material',
+            `color: ${color}; opacity: 0.25; transparent: true`);
+        }
+      },
+
+      _endGrab: function () {
+        this.isGrabbed    = false;
+        this.activeSource = null;
+        this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
+      },
+
+      // ── tick: läuft jeden Frame ──────────────────────────────
+      tick: function () {
+        // Kamera lazy
+        if (!this.camObj) {
+          const camEl = document.querySelector('a-camera');
+          if (!camEl?.object3D) return;
+          this.camObj = camEl.object3D;
+        }
+
+        const handR = document.querySelector('#hand-right');
+        if (!handR) return;
+
+        // ── HAND-NÄHE PRÜFEN ──────────────────────────────────
+        // Vergleich mit Rig-Position (Modellmittelpunkt) – korrekt
+        if (!this.isGrabbed && !this.isTwoHandZoom) {
+          handR.object3D.getWorldPosition(this.tmpA);
+          this.rig.getWorldPosition(this.tmpB);
+          const dist   = this.tmpA.distanceTo(this.tmpB);
+          const wasNear = this.handNearObject;
+          this.handNearObject = dist < this.grabRadius;
+          if (this.handNearObject !== wasNear) {
+            this._setBoxColor(this.handNearObject ? '#00FF44' : '#00AA00');
+          }
+        }
+
+        // ── TWO-HAND-ZOOM ──────────────────────────────────────
+        if (this.isTwoHandZoom) {
+          const curDist = this._getTwoHandDist();
+          if (this.twoHandStartDist > 0.001) {
+            const ratio = curDist / this.twoHandStartDist;
+            this.currentScale = Math.max(0.05, Math.min(10.0,
+              this.twoHandStartScale * ratio));
+            this.modelNode.scale.setScalar(this.currentScale);
+          }
+          return; // während Two-Hand-Zoom nichts anderes
+        }
+
+        // ── JOYSTICK: Rotation & Zoom ─────────────────────────
+        if (!this.isGrabbed) {
+          if (Math.abs(this.stickX) > this.deadzone) {
+            this.modelNode.rotation.y +=
+              (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
+          }
+
+          if (Math.abs(this.stickY) > this.deadzone) {
+            this.camObj.getWorldPosition(this.tmpA);
+            this.rig.getWorldPosition(this.tmpB);
+            this.tmpDir.subVectors(this.tmpB, this.tmpA);
+            let d = this.tmpDir.length();
+            if (d < 0.001) {
+              this.camObj.getWorldDirection(this.tmpDir);
+              d = 0.5;
             } else {
-              return; 
+              this.tmpDir.normalize();
             }
-          }
-
-          if (!this.isGrabbed) {
-            if (Math.abs(this.stickX) > this.deadzone) {
-               this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
-            }
-
-            if (Math.abs(this.stickY) > this.deadzone) {
-              this.cameraObj.getWorldPosition(this.tmpCamPos);
-              this.rig.getWorldPosition(this.tmpRigPos);
-
-              this.tmpDir.subVectors(this.tmpRigPos, this.tmpCamPos);
-              let dist = this.tmpDir.length();
-
-              if (dist < 0.0001) {
-                this.cameraObj.getWorldDirection(this.tmpForward);
-                this.tmpDir.copy(this.tmpForward);
-                dist = 0.5;
-              } else {
-                this.tmpDir.normalize();
-              }
-
-              if (this.stickY > this.deadzone) {
-                dist -= this.zoomStep; 
-              } else if (this.stickY < -this.deadzone) {
-                dist += this.zoomStep; 
-              }
-
-              dist = Math.max(this.minDistance, Math.min(this.maxDistance, dist));
-
-              this.tmpRigPos.copy(this.tmpCamPos).add(this.tmpDir.multiplyScalar(dist));
-              this.rig.position.copy(this.tmpRigPos);
-            }
-          }
-
-          if (this.isGrabbed) {
-            this.controller.object3D.getWorldPosition(this.tmpControllerPos);
-            this.controller.object3D.getWorldQuaternion(this.tmpControllerQuat);
-            this.tmpOffset.copy(this.holdOffset).applyQuaternion(this.tmpControllerQuat);
-            this.rig.position.copy(this.tmpControllerPos).add(this.tmpOffset);
-            this.rig.quaternion.copy(this.tmpControllerQuat);
+            d += (this.stickY > this.deadzone ? -this.zoomStep : this.zoomStep);
+            d = Math.max(this.minDistance, Math.min(this.maxDistance, d));
+            this.rig.position.copy(this.tmpA).addScaledVector(this.tmpDir, d);
           }
         }
-      });
-    </script>
-  </head>
 
-  <body>
-    <a-scene 
-      xr-mode-ui="XRMode: ar" 
-      webxr="optionalFeatures: hand-tracking;"
-      renderer="colorManagement: true; antialias: true; physicallyCorrectLights: true; exposure: 1.2;">
+        // ── OBJEKT BEWEGEN ────────────────────────────────────
+        if (this.isGrabbed) {
+          if (this.activeSource === 'controller') {
+            const ctrlEl = document.querySelector('#controller-right');
+            ctrlEl.object3D.getWorldPosition(this.tmpA);
+            ctrlEl.object3D.getWorldQuaternion(this.tmpQ);
+            this.tmpC.copy(this.holdOffset).applyQuaternion(this.tmpQ);
+            this.rig.position.copy(this.tmpA).add(this.tmpC);
+            this.rig.quaternion.copy(this.tmpQ);
 
-      <a-assets>
-        <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
-      </a-assets>
+          } else if (this.activeSource === 'hand') {
+            handR.object3D.getWorldPosition(this.tmpA);
+            handR.object3D.getWorldQuaternion(this.tmpQ);
+            this.rig.position.copy(this.tmpA);
+            this.rig.quaternion.copy(this.tmpQ);
+          }
+        }
+      }
+    });
+  </script>
+</head>
 
-      <a-camera position="0 1.6 0"></a-camera>
-      
-      <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
-      <a-light type="directional" color="#FFF" intensity="1.5" position="-1 2 1" castShadow="true"></a-light>
-      <a-light type="directional" color="#FFDDBB" intensity="0.5" position="1 -1 -1"></a-light>
+<body>
+  <!--
+    WEBXR SESSION:
+    - requiredFeatures: local-floor  → Boden-Referenz (wichtig für 1:1 Höhenwahrnehmung)
+    - optionalFeatures: hand-tracking → freie Hände ohne Controller
+  -->
+  <a-scene
+    xr-mode-ui="XRMode: ar"
+    webxr="requiredFeatures: local-floor; optionalFeatures: hand-tracking;"
+    renderer="colorManagement: true; antialias: true; physicallyCorrectLights: true; exposure: 1.2;">
 
-      <a-entity id="rig" position="0 1.2 -0.6">
-        <a-box
-          class="grabbable"
+    <a-assets>
+      <!--
+        Deine GLB-Datei hier eintragen.
+        Wenn du mehrere Modelle testen willst, füge mehrere asset-items ein
+        und wechsle die id="meinModell" unten am gltf-model.
+      -->
+      <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
+    </a-assets>
+
+    <a-camera position="0 1.6 0"></a-camera>
+
+    <!-- Beleuchtung: HDR-ähnlich mit zwei Richtungslichtern -->
+    <a-light type="ambient"     color="#FFF"    intensity="0.5"></a-light>
+    <a-light type="directional" color="#FFF"    intensity="1.4" position="-1 2 1"  castShadow="true"></a-light>
+    <a-light type="directional" color="#FFDDBB" intensity="0.4" position="1 -1 -1"></a-light>
+
+    <!--
+      RIG = Halter des Modells in der Welt
+      position="0 1.2 -0.6" = 60cm vor dem Nutzer, 1.20m hoch
+      Passe position an deinen Startpunkt an.
+    -->
+    <a-entity id="rig" position="0 1.2 -0.6">
+
+      <!--
+        GRAB-BOX:
+          Farben als Statusanzeige:
+            dunkelgrün  (#00AA00) = Modell liegt im Raum, Hand zu weit weg
+            hellgrün    (#00FF44) = Hand in Reichweite → jetzt pinchen!
+            orange      (#FF8800) = Controller hält
+            blau        (#0088FF) = rechte Hand hält
+            lila        (#AA00FF) = Two-Hand-Zoom aktiv
+
+          Grösse wird automatisch vom auto-center-scale auf Modellgrösse gesetzt.
+          Fallback: 0.5×0.5×0.5 m
+      -->
+      <a-box
+        id="grab-box"
+        class="grabbable"
+        position="0 0 0"
+        depth="0.5" height="0.5" width="0.5"
+        material="color: #00AA00; opacity: 0.18; transparent: true"
+        wireframe="true">
+      </a-box>
+
+      <a-entity id="model-node">
+        <a-entity
+          id="modell-objekt"
+          gltf-model="#meinModell"
           position="0 0 0"
-          depth="0.5"
-          height="0.5"
-          width="0.5"
-          material="color: green; opacity: 0.2; transparent: true">
-        </a-box>
-
-        <a-entity id="model-node">
-          <a-entity
-            id="modell-objekt"
-            gltf-model="#meinModell"
-            scale="1 1 1"
-            position="-0.8 0 0.2"
-            auto-center>
-          </a-entity>
+          auto-center-scale>
+          <!--
+            HINWEIS: scale wird von auto-center-scale via model.scale.setScalar()
+            gesetzt – NICHT via A-Frame scale-Attribut, damit die Box-Berechnung
+            danach die skalierten Dimensionen korrekt ausliest.
+          -->
         </a-entity>
       </a-entity>
+    </a-entity>
 
-      <a-entity id="controller"
-                oculus-touch-controls="hand: right"
-                raycaster="objects: .grabbable; showLine: true; far: 100"
-                line="color: yellow; opacity: 1"
-                ar-steuerung>
-      </a-entity>
+    <!--
+      CONTROLLER (rechts) – Oculus Touch
+      Trigger = Greifen / Loslassen
+      Joystick = Rotation (links/rechts) + Zoom (vor/zurück)
+    -->
+    <a-entity id="controller-right"
+              oculus-touch-controls="hand: right"
+              raycaster="objects: .grabbable; showLine: true; far: 50"
+              line="color: #FFFF00; opacity: 0.8"
+              ar-steuerung>
+    </a-entity>
 
-      <a-entity id="free-hand"
-                hand-tracking-controls="hand: right"
-                raycaster="objects: .grabbable; showLine: true; far: 100"
-                line="color: red; opacity: 1"
-                ar-steuerung>
-      </a-entity>
+    <!--
+      HAND rechts – freie Hand ohne Controller
+      Pinch (Daumen + Zeigefinger) = Greifen / Loslassen
+      Two-Hand-Pinch (beide Hände gleichzeitig) = Zoom / Skalieren
+    -->
+    <a-entity id="hand-right"
+              hand-tracking-controls="hand: right; modelStyle: dots">
+    </a-entity>
 
-    </a-scene>
-  </body>
+    <!--
+      HAND links – nur für Two-Hand-Zoom benötigt
+    -->
+    <a-entity id="hand-left"
+              hand-tracking-controls="hand: left; modelStyle: dots">
+    </a-entity>
+
+  </a-scene>
+</body>
 </html>
