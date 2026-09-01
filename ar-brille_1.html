@@ -2,21 +2,30 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Brille - Greifen, Schnitt & Masse</title>
+    <title>AR Viewer - Greifen, Schnitt & Masse</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
 
       // ════════════════════════════════════════════════════════════════
       // GLB BIBLIOTHEK
-      //   unit: 'm'  = GLB in Metern (glTF-Standard)
-      //   unit: 'mm' = GLB-Werte sind Millimeter
-      //   unit: 'cm' = GLB-Werte sind Zentimeter
+      //
+      //   name     = Anzeigename im Menue
+      //   src      = Dateiname (gleicher Ordner wie diese HTML)
+      //   unit     = Einheit der GLB-Werte:
+      //                'm'  = Meter      (TopSolid, FreeCAD, Blender)
+      //                'mm' = Millimeter
+      //                'cm' = Zentimeter
+      //   massstab = Darstellungs-Massstab (optional, Standard 1):
+      //                1   = 1:1 (echte Groesse)
+      //                100 = 1:100 (Tischmodell)
+      //   boden    = true -> Modell wird auf den realen Fussboden
+      //              gestellt (fuer begehbare 1:1-Gebaeude)
       // ════════════════════════════════════════════════════════════════
       const GLB_BIBLIOTHEK = [
-        { name: 'AR Brille',     src: 'EntwurfARBrille.glb', unit: 'm' },
-        { name: 'STEP Export 1', src: 'bauteil1.glb',        unit: 'm' },
-        { name: 'STEP Export 2', src: 'bauteil2.glb',        unit: 'm' },
+        { name: 'AR Brille',    src: 'EntwurfARBrille.glb', unit: 'm' },
+        { name: 'Neubau 1:100', src: 'neubau.glb',          unit: 'm', massstab: 100 },
+        { name: 'Neubau 1:1',   src: 'neubau.glb',          unit: 'm', massstab: 1, boden: true },
       ];
 
       const UNIT_SCALE = { 'mm': 0.001, 'cm': 0.01, 'm': 1.0 };
@@ -31,12 +40,21 @@
         } catch (err) { /* nie kritisch */ }
       }
 
+      // Laenge huebsch formatieren: unter 1 m in mm, sonst in m
+      function fmtLen(m) {
+        return m < 1 ? (m * 1000).toFixed(0) + ' mm' : m.toFixed(2) + ' m';
+      }
+
 
       // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 1: AUTO-CENTER + MASSSTAB + MASSE MELDEN
+      // KOMPONENTE 1: AUTO-CENTER + MASSSTAB + BODEN + MASSE MELDEN
       // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('auto-center', {
-        schema: { unitScale: { type: 'number', default: 1.0 } },
+        schema: {
+          unitScale: { type: 'number',  default: 1.0 },  // GLB-Einheit -> Meter
+          viewScale: { type: 'number',  default: 1.0 },  // Darstellung (1/massstab)
+          boden:     { type: 'boolean', default: false } // Unterkante auf Rig-Boden
+        },
 
         init: function () {
           this.el.addEventListener('model-error', () => {
@@ -48,41 +66,63 @@
               const model = e.detail.model;
               if (!model) return;
 
+              // Sicherstellen, dass alte Skalierung nicht die Box verfaelscht
+              this.el.object3D.scale.set(1, 1, 1);
+              model.position.set(0, 0, 0);
+              model.updateMatrixWorld(true);
+
               const box = new THREE.Box3().setFromObject(model);
               if (box.isEmpty()) {
                 console.warn('Das 3D-Modell ist leer.');
                 return;
               }
 
+              const size   = new THREE.Vector3();
               const center = new THREE.Vector3();
+              box.getSize(size);
               box.getCenter(center);
-              model.position.x -= center.x;
-              model.position.y -= center.y;
-              model.position.z -= center.z;
 
-              const s = this.data.unitScale;
-              if (s !== 1.0) {
-                this.el.object3D.scale.set(s, s, s);
+              // Zentrieren (X/Z immer, Y nur wenn nicht "boden")
+              model.position.x -= center.x;
+              model.position.z -= center.z;
+              if (this.data.boden) {
+                model.position.y -= box.min.y;      // Unterkante auf 0
+              } else {
+                model.position.y -= center.y;       // Mitte auf 0
               }
 
-              // Reale Groesse in Metern
-              const size = new THREE.Vector3();
-              box.getSize(size);
-              const dims = { x: size.x * s, y: size.y * s, z: size.z * s };
+              // Gesamt-Skalierung = Einheit * Darstellungs-Massstab
+              const s = this.data.unitScale * this.data.viewScale;
+              this.el.object3D.scale.set(s, s, s);
 
-              const mmX = (dims.x * 1000).toFixed(0);
-              const mmY = (dims.y * 1000).toFixed(0);
-              const mmZ = (dims.z * 1000).toFixed(0);
-              console.log('Modell | Groesse: ' + mmX + ' x ' + mmY + ' x ' + mmZ + ' mm');
-              setHudText('#ui-size', mmX + ' x ' + mmY + ' x ' + mmZ + ' mm', '#AAFFAA');
+              // Reale Groesse (Meter) und dargestellte Groesse (Meter)
+              const real = { x: size.x * this.data.unitScale,
+                             y: size.y * this.data.unitScale,
+                             z: size.z * this.data.unitScale };
+              const disp = { x: real.x * this.data.viewScale,
+                             y: real.y * this.data.viewScale,
+                             z: real.z * this.data.viewScale };
+
+              console.log('Modell | real: ' + fmtLen(real.x) + ' x ' + fmtLen(real.y)
+                + ' x ' + fmtLen(real.z) + ' | dargestellt: ' + fmtLen(disp.x)
+                + ' x ' + fmtLen(disp.y) + ' x ' + fmtLen(disp.z));
+              setHudText('#ui-size',
+                fmtLen(real.x) + ' x ' + fmtLen(real.y) + ' x ' + fmtLen(real.z), '#AAFFAA');
+
+              // Schnittbereich an Modellgroesse anpassen
+              const clipEl = document.querySelector('#clip-controller');
+              if (clipEl && clipEl.components['clipping-plane']) {
+                const maxDim = Math.max(disp.x, disp.y, disp.z);
+                clipEl.components['clipping-plane'].setRange(Math.max(0.05, maxDim / 2 + 0.02));
+              }
 
               // Mass-Anzeige am Objekt aktualisieren
               const mn = document.querySelector('#model-node');
               if (mn && mn.components['mass-anzeige']) {
-                // Offset = Position des Modell-Entities innerhalb von model-node
                 const off = this.el.object3D.position;
-                mn.components['mass-anzeige'].rebuild(dims,
-                  { x: off.x, y: off.y, z: off.z });
+                const centerY = this.data.boden ? off.y + disp.y / 2 : off.y;
+                mn.components['mass-anzeige'].rebuild(disp, real,
+                  { x: off.x, y: centerY, z: off.z });
               }
             } catch (err) {
               console.error('auto-center Fehler:', err);
@@ -93,9 +133,8 @@
 
 
       // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 2: MASS-ANZEIGE (optional per Joystick-Druck)
-      // Wireframe-Rahmen + mm-Beschriftung direkt am Objekt.
-      // Zum Pruefen ob wirklich 1:1: mit realem Massstab vergleichen!
+      // KOMPONENTE 2: MASS-ANZEIGE (Joystick-Druck)
+      // Wireframe in dargestellter Groesse, Beschriftung mit REALEN Massen
       // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('mass-anzeige', {
         init: function () {
@@ -103,56 +142,51 @@
           this.holder  = null;
         },
 
-        rebuild: function (dims, offset) {
+        rebuild: function (disp, real, center) {
           try {
-            // Alte Anzeige entfernen
             if (this.holder && this.holder.parentNode) {
               this.holder.parentNode.removeChild(this.holder);
             }
 
             this.holder = document.createElement('a-entity');
-            this.holder.setAttribute('position',
-              offset.x + ' ' + offset.y + ' ' + offset.z);
+            this.holder.setAttribute('position', center.x + ' ' + center.y + ' ' + center.z);
             this.el.appendChild(this.holder);
 
-            // Wireframe-Box exakt in Modellgroesse
             const wf = document.createElement('a-box');
-            wf.setAttribute('width',  dims.x);
-            wf.setAttribute('height', dims.y);
-            wf.setAttribute('depth',  dims.z);
+            wf.setAttribute('width',  disp.x);
+            wf.setAttribute('height', disp.y);
+            wf.setAttribute('depth',  disp.z);
             wf.setAttribute('material',
               'wireframe: true; color: #00FFAA; opacity: 0.9; transparent: true');
             this.holder.appendChild(wf);
 
-            const mm = (v) => (v * 1000).toFixed(1) + ' mm';
+            const tw = (d) => Math.min(Math.max(0.6, d * 2), 10);
+            const gap = Math.max(0.03, Math.max(disp.x, disp.y, disp.z) * 0.06);
 
-            // Beschriftung BREITE (X) - unter dem Objekt
             const tx = document.createElement('a-text');
-            tx.setAttribute('value', 'B: ' + mm(dims.x));
+            tx.setAttribute('value', 'B: ' + fmtLen(real.x));
             tx.setAttribute('align', 'center');
             tx.setAttribute('color', '#00FFAA');
-            tx.setAttribute('width', Math.max(0.6, dims.x * 2));
-            tx.setAttribute('position', '0 ' + (-dims.y / 2 - 0.03) + ' ' + (dims.z / 2));
+            tx.setAttribute('width', tw(disp.x));
+            tx.setAttribute('position', '0 ' + (-disp.y / 2 - gap) + ' ' + (disp.z / 2));
             this.holder.appendChild(tx);
 
-            // Beschriftung HOEHE (Y) - rechts neben dem Objekt
             const ty = document.createElement('a-text');
-            ty.setAttribute('value', 'H: ' + mm(dims.y));
+            ty.setAttribute('value', 'H: ' + fmtLen(real.y));
             ty.setAttribute('align', 'center');
             ty.setAttribute('color', '#00FFAA');
-            ty.setAttribute('width', Math.max(0.6, dims.y * 2));
+            ty.setAttribute('width', tw(disp.y));
             ty.setAttribute('rotation', '0 0 90');
-            ty.setAttribute('position', (dims.x / 2 + 0.03) + ' 0 ' + (dims.z / 2));
+            ty.setAttribute('position', (disp.x / 2 + gap) + ' 0 ' + (disp.z / 2));
             this.holder.appendChild(ty);
 
-            // Beschriftung TIEFE (Z) - oben auf dem Objekt
             const tz = document.createElement('a-text');
-            tz.setAttribute('value', 'T: ' + mm(dims.z));
+            tz.setAttribute('value', 'T: ' + fmtLen(real.z));
             tz.setAttribute('align', 'center');
             tz.setAttribute('color', '#00FFAA');
-            tz.setAttribute('width', Math.max(0.6, dims.z * 2));
+            tz.setAttribute('width', tw(disp.z));
             tz.setAttribute('rotation', '-90 0 0');
-            tz.setAttribute('position', '0 ' + (dims.y / 2 + 0.03) + ' 0');
+            tz.setAttribute('position', '0 ' + (disp.y / 2 + gap) + ' 0');
             this.holder.appendChild(tz);
 
             this.holder.setAttribute('visible', this.visible);
@@ -175,7 +209,7 @@
       AFRAME.registerComponent('hud-follow', {
         schema: {
           distance: { type: 'number', default: 0.8 },
-          offsetY:  { type: 'number', default: -0.32 }
+          offsetY:  { type: 'number', default: -0.22 }
         },
 
         init: function () {
@@ -190,9 +224,7 @@
             if (!cam) return;
 
             cam.getWorldPosition(this.tmpPos);
-            // WICHTIG: Bei Kameras liefert getWorldDirection bereits die
-            // BLICKRICHTUNG (nach vorne) - NICHT negieren!
-            cam.getWorldDirection(this.tmpDir);
+            cam.getWorldDirection(this.tmpDir);   // = Blickrichtung, NICHT negieren
             cam.getWorldQuaternion(this.tmpQuat);
 
             this.el.object3D.position.copy(this.tmpPos)
@@ -205,16 +237,21 @@
 
 
       // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 4: SCHNITTANSICHT (X / Y / Z)
+      // KOMPONENTE 4: SCHNITTANSICHT (X / Y / Z, an Objekt-Achsen)
       // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('clipping-plane', {
         init: function () {
           this.plane        = new THREE.Plane();
           this.clipPosition = 0;
+          this.range        = 0.5;   // wird von auto-center gesetzt
           this.axis         = 'y';
           this.enabled      = false;
           this.ready        = false;
-          this.tmpRigPos    = new THREE.Vector3();
+
+          this.tmpPos    = new THREE.Vector3();
+          this.tmpQuat   = new THREE.Quaternion();
+          this.tmpNormal = new THREE.Vector3();
+          this.tmpPoint  = new THREE.Vector3();
 
           const setup = () => {
             try {
@@ -230,6 +267,11 @@
 
           if (this.el.sceneEl.hasLoaded) setup();
           else this.el.sceneEl.addEventListener('loaded', setup);
+        },
+
+        setRange: function (r) {
+          this.range = r;
+          this.clipPosition = 0;
         },
 
         cycleAxis: function () {
@@ -248,24 +290,32 @@
           }
         },
 
-        move: function (delta) {
-          this.clipPosition = Math.max(-0.5, Math.min(0.5, this.clipPosition + delta));
+        // deltaFrac = Anteil des Bereichs pro Frame (z.B. 0.01 = 1 %)
+        move: function (deltaFrac) {
+          this.clipPosition += deltaFrac * this.range;
+          this.clipPosition = Math.max(-this.range, Math.min(this.range, this.clipPosition));
         },
 
         tick: function () {
           if (!this.enabled || !this.ready) return;
           try {
-            const rigEl = document.querySelector('#rig');
-            if (!rigEl) return;
-            rigEl.object3D.getWorldPosition(this.tmpRigPos);
+            const mnEl = document.querySelector('#model-node');
+            if (!mnEl) return;
+            const mn = mnEl.object3D;
 
-            let normal;
-            if      (this.axis === 'y') normal = new THREE.Vector3(0, -1,  0);
-            else if (this.axis === 'x') normal = new THREE.Vector3(-1, 0,  0);
-            else                         normal = new THREE.Vector3(0,  0, -1);
+            mn.getWorldPosition(this.tmpPos);
+            mn.getWorldQuaternion(this.tmpQuat);
 
-            const constant = -normal.dot(this.tmpRigPos) + this.clipPosition;
-            this.plane.set(normal, -constant);
+            if      (this.axis === 'y') this.tmpNormal.set(0, -1,  0);
+            else if (this.axis === 'x') this.tmpNormal.set(-1, 0,  0);
+            else                         this.tmpNormal.set(0,  0, -1);
+
+            this.tmpNormal.applyQuaternion(this.tmpQuat).normalize();
+
+            this.tmpPoint.copy(this.tmpPos)
+              .addScaledVector(this.tmpNormal, -this.clipPosition);
+
+            this.plane.setFromNormalAndCoplanarPoint(this.tmpNormal, this.tmpPoint);
           } catch (err) { /* nie kritisch */ }
         }
       });
@@ -292,6 +342,11 @@
           };
           if (this.el.sceneEl.hasLoaded) build();
           else this.el.sceneEl.addEventListener('loaded', build);
+        },
+
+        _label: function (item) {
+          const ms = item.massstab && item.massstab !== 1 ? ' 1:' + item.massstab : ' 1:1';
+          return item.name + ms + (item.boden ? ' (Boden)' : '') + '  [' + item.src + ']';
         },
 
         _buildPanel: function () {
@@ -341,7 +396,7 @@
             const isSel = i === this.selectedIdx;
             this.itemEls[i].setAttribute('color', isSel ? '#FFD700' : '#FFFFFF');
             this.itemEls[i].setAttribute('value',
-              (isSel ? '> ' : '  ') + this.items[i].name + '  [' + this.items[i].unit + ']');
+              (isSel ? '> ' : '  ') + this._label(this.items[i]));
           }
         },
 
@@ -361,16 +416,43 @@
 
         loadSelected: function () {
           try {
-            const item    = this.items[this.selectedIdx];
-            const modelEl = document.querySelector('#modell-objekt');
-            const scale   = UNIT_SCALE[item.unit] || 1.0;
+            const item      = this.items[this.selectedIdx];
+            const modelEl   = document.querySelector('#modell-objekt');
+            const rigEl     = document.querySelector('#rig');
+            const unitScale = UNIT_SCALE[item.unit] || 1.0;
+            const massstab  = item.massstab && item.massstab > 0 ? item.massstab : 1;
+            const viewScale = 1 / massstab;
+            const boden     = !!item.boden;
 
             setHudText('#ui-size', 'Modell laedt...', '#FFAA00');
-            modelEl.setAttribute('auto-center', 'unitScale: ' + scale);
+
+            // Rig zuruecksetzen: Drehung raus, Position je nach Modus
+            rigEl.object3D.quaternion.set(0, 0, 0, 1);
+            document.querySelector('#model-node').object3D.rotation.set(0, 0, 0);
+            if (boden) {
+              // Auf den realen Fussboden, 1.5 m vor dem Nutzer
+              const cam = this.el.sceneEl.camera;
+              if (cam) {
+                cam.getWorldPosition(this.tmpPos);
+                cam.getWorldDirection(this.tmpDir);
+                this.tmpDir.y = 0; this.tmpDir.normalize();
+                rigEl.object3D.position.copy(this.tmpPos).addScaledVector(this.tmpDir, 1.5);
+                rigEl.object3D.position.y = 0;
+              } else {
+                rigEl.object3D.position.set(0, 0, -1.5);
+              }
+            } else {
+              rigEl.object3D.position.set(0, 1.2, -0.6);
+            }
+
+            modelEl.setAttribute('auto-center',
+              'unitScale: ' + unitScale + '; viewScale: ' + viewScale + '; boden: ' + boden);
             modelEl.setAttribute('gltf-model', item.src);
 
-            setHudText('#ui-modell-name', item.name);
-            setHudText('#ui-scale-info', '1:1 (1 Einheit = 1 ' + item.unit + ')');
+            setHudText('#ui-modell-name', item.name + '  (' + item.src + ')');
+            setHudText('#ui-scale-info',
+              'Massstab 1:' + massstab + '  |  Einheit: ' + item.unit
+              + (boden ? '  |  auf Boden' : ''));
           } catch (err) {
             console.error('Bibliothek Lade-Fehler:', err);
           }
@@ -384,7 +466,6 @@
             if (!cam) return;
 
             cam.getWorldPosition(this.tmpPos);
-            // Blickrichtung NICHT negieren (siehe hud-follow)
             cam.getWorldDirection(this.tmpDir);
             cam.getWorldQuaternion(this.tmpQuat);
 
@@ -399,15 +480,13 @@
       // ════════════════════════════════════════════════════════════════
       // KOMPONENTE 6: AR-STEUERUNG
       //
-      // Trigger (auf Objekt zeigen) = GREIFEN: Objekt folgt dem
-      //                               Controller natuerlich in alle
-      //                               Richtungen (Position + Drehung)
-      // Grip                        = Bibliothek oeffnen/schliessen
-      // Stick X                     = Modell drehen
-      // Stick Y                     = Zoom / Schnittebene / Bibliothek
-      // A                           = Schnitt EIN/AUS
-      // B                           = Schnitt-Achse (Y -> X -> Z)
-      // Stick DRUECKEN              = Mass-Anzeige EIN/AUS
+      // Trigger (auf Box zeigen) = Greifen: bewegen 1:1, drehen um sich selbst
+      // Grip                     = Bibliothek
+      // Stick X                  = Modell drehen
+      // Stick Y                  = Zoom / Schnittebene / Bibliothek
+      // A                        = Schnitt EIN/AUS
+      // B                        = Schnitt-Achse (Y -> X -> Z)
+      // Stick DRUECKEN           = Mass-Anzeige EIN/AUS
       // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('ar-steuerung', {
         init: function () {
@@ -424,20 +503,22 @@
           this.rotateStep  = 0.05;
           this.zoomStep    = 0.03;
           this.minDistance = 0.2;
-          this.maxDistance = 4.0;
+          this.maxDistance = 30.0;
 
-          // Grab-Offsets (werden beim Zupacken berechnet)
-          this.grabPosOffset  = new THREE.Vector3();
-          this.grabQuatOffset = new THREE.Quaternion();
+          this.grabCtrlStartPos  = new THREE.Vector3();
+          this.grabCtrlStartQuat = new THREE.Quaternion();
+          this.grabRigStartPos   = new THREE.Vector3();
+          this.grabRigStartQuat  = new THREE.Quaternion();
 
-          this.tmpControllerPos  = new THREE.Vector3();
-          this.tmpControllerQuat = new THREE.Quaternion();
-          this.tmpInvQuat        = new THREE.Quaternion();
-          this.tmpVec            = new THREE.Vector3();
-          this.tmpCamPos         = new THREE.Vector3();
-          this.tmpRigPos         = new THREE.Vector3();
-          this.tmpDir            = new THREE.Vector3();
-          this.tmpForward        = new THREE.Vector3();
+          this.tmpCtrlPos  = new THREE.Vector3();
+          this.tmpCtrlQuat = new THREE.Quaternion();
+          this.tmpDelta    = new THREE.Vector3();
+          this.tmpDeltaQ   = new THREE.Quaternion();
+          this.tmpInvQ     = new THREE.Quaternion();
+          this.tmpCamPos   = new THREE.Vector3();
+          this.tmpRigPos   = new THREE.Vector3();
+          this.tmpDir      = new THREE.Vector3();
+          this.tmpForward  = new THREE.Vector3();
 
           const getMenu = () => {
             const comps = this.el.components;
@@ -454,7 +535,7 @@
           this._getMenu = getMenu;
           this._getClip = getClip;
 
-          // --- TRIGGER: Greifen starten ---
+          // --- TRIGGER ---
           this.controller.addEventListener('triggerdown', () => {
             const menu = getMenu();
             if (menu && menu.visible) {
@@ -467,25 +548,10 @@
             for (let i = 0; i < hits.length; i++) {
               if (hits[i].object && hits[i].object.el &&
                   hits[i].object.el.classList.contains('grabbable')) {
-
-                // NATUERLICHES GREIFEN:
-                // Versatz zwischen Objekt und Controller im Moment des
-                // Zupackens merken - Objekt springt NICHT zum Controller,
-                // sondern folgt ab jetzt relativ.
-                this.controller.object3D.getWorldPosition(this.tmpControllerPos);
-                this.controller.object3D.getWorldQuaternion(this.tmpControllerQuat);
-
-                this.tmpInvQuat.copy(this.tmpControllerQuat).invert();
-
-                // Positions-Versatz im Controller-Koordinatensystem
-                this.grabPosOffset.copy(this.rig.position)
-                  .sub(this.tmpControllerPos)
-                  .applyQuaternion(this.tmpInvQuat);
-
-                // Rotations-Versatz
-                this.grabQuatOffset.copy(this.tmpInvQuat)
-                  .multiply(this.rig.quaternion);
-
+                this.controller.object3D.getWorldPosition(this.grabCtrlStartPos);
+                this.controller.object3D.getWorldQuaternion(this.grabCtrlStartQuat);
+                this.grabRigStartPos.copy(this.rig.position);
+                this.grabRigStartQuat.copy(this.rig.quaternion);
                 this.isGrabbed = true;
                 break;
               }
@@ -550,7 +616,7 @@
           const menu = this._getMenu ? this._getMenu() : null;
           const clip = this._getClip ? this._getClip() : null;
 
-          // --- Bibliothek offen: Stick navigiert ---
+          // --- Bibliothek offen ---
           if (menu && menu.visible) {
             if (this.stickCool <= 0 && Math.abs(this.stickY) > this.deadzone) {
               if (this.stickY > this.deadzone) menu.navigateDown();
@@ -561,23 +627,21 @@
             return;
           }
 
-          // --- GEGRIFFEN: Objekt folgt dem Controller natuerlich ---
+          // --- GEGRIFFEN ---
           if (this.isGrabbed) {
-            this.controller.object3D.getWorldPosition(this.tmpControllerPos);
-            this.controller.object3D.getWorldQuaternion(this.tmpControllerQuat);
+            this.controller.object3D.getWorldPosition(this.tmpCtrlPos);
+            this.controller.object3D.getWorldQuaternion(this.tmpCtrlQuat);
 
-            // Position: Controller + (gedrehter Versatz)
-            this.tmpVec.copy(this.grabPosOffset)
-              .applyQuaternion(this.tmpControllerQuat);
-            this.rig.position.copy(this.tmpControllerPos).add(this.tmpVec);
+            this.tmpDelta.copy(this.tmpCtrlPos).sub(this.grabCtrlStartPos);
+            this.rig.position.copy(this.grabRigStartPos).add(this.tmpDelta);
 
-            // Drehung: Controller * Versatz
-            this.rig.quaternion.copy(this.tmpControllerQuat)
-              .multiply(this.grabQuatOffset);
+            this.tmpInvQ.copy(this.grabCtrlStartQuat).invert();
+            this.tmpDeltaQ.copy(this.tmpCtrlQuat).multiply(this.tmpInvQ);
+            this.rig.quaternion.copy(this.tmpDeltaQ).multiply(this.grabRigStartQuat);
             return;
           }
 
-          // --- Nicht gegriffen: Rotation ---
+          // --- Rotation per Stick ---
           if (Math.abs(this.stickX) > this.deadzone) {
             this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
           }
@@ -585,7 +649,7 @@
           // --- Stick Y: Schnittebene ODER Zoom ---
           if (Math.abs(this.stickY) > this.deadzone) {
             if (clip && clip.enabled) {
-              clip.move(this.stickY * -0.006);
+              clip.move(this.stickY * -0.012);
             } else {
               this.cameraObj.getWorldPosition(this.tmpCamPos);
               this.rig.getWorldPosition(this.tmpRigPos);
@@ -637,9 +701,9 @@
       <!-- HUD -->
       <a-entity id="hud" hud-follow="distance: 0.8; offsetY: -0.22">
         <a-plane width="0.55" height="0.28" color="#111122" opacity="0.75"></a-plane>
-        <a-text id="ui-modell-name" value="AR Brille"
+        <a-text id="ui-modell-name" value="AR Brille  (EntwurfARBrille.glb)"
                 align="center" color="#FFD700" width="1.1" position="0 0.10 0.001"></a-text>
-        <a-text id="ui-scale-info" value="1:1 (1 Einheit = 1 m)"
+        <a-text id="ui-scale-info" value="Massstab 1:1  |  Einheit: m"
                 align="center" color="#00CCFF" width="0.9" position="0 0.06 0.001"></a-text>
         <a-text id="ui-size" value="Modell laedt..."
                 align="center" color="#FFAA00" width="0.85" position="0 0.02 0.001"></a-text>
@@ -669,8 +733,8 @@
             id="modell-objekt"
             gltf-model="#meinModell"
             scale="1 1 1"
-            position="-0.5 0 0.2"
-            auto-center>
+            position="0 0 0"
+            auto-center="unitScale: 1.0; viewScale: 1.0; boden: false">
           </a-entity>
         </a-entity>
       </a-entity>
@@ -678,15 +742,7 @@
       <!-- Clipping Plane -->
       <a-entity id="clip-controller" clipping-plane></a-entity>
 
-      <!-- CONTROLLER (rechts):
-           Trigger      = Greifen (Objekt folgt natuerlich) / laden
-           Grip         = Bibliothek
-           Stick X      = Drehen
-           Stick Y      = Zoom / Schnittebene / Bibliothek
-           A            = Schnitt EIN/AUS
-           B            = Achse Y -> X -> Z
-           Stick-Druck  = Mass-Anzeige EIN/AUS
-      -->
+      <!-- CONTROLLER (rechts) -->
       <a-entity id="controller-right"
                 oculus-touch-controls="hand: right"
                 raycaster="objects: .grabbable; showLine: true; far: 100"
