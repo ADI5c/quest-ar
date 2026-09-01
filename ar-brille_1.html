@@ -2,7 +2,7 @@
 <html>
   <head>
     <meta charset="utf-8">
-    <title>AR Viewer - Greifen, Schnitt & Masse</title>
+    <title>AR Viewer - Greifen, Schnitt, Masse & Fliegen</title>
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
@@ -12,15 +12,9 @@
       //
       //   name     = Anzeigename im Menue
       //   src      = Dateiname (gleicher Ordner wie diese HTML)
-      //   unit     = Einheit der GLB-Werte:
-      //                'm'  = Meter      (TopSolid, FreeCAD, Blender)
-      //                'mm' = Millimeter
-      //                'cm' = Zentimeter
-      //   massstab = Darstellungs-Massstab (optional, Standard 1):
-      //                1   = 1:1 (echte Groesse)
-      //                100 = 1:100 (Tischmodell)
-      //   boden    = true -> Modell wird auf den realen Fussboden
-      //              gestellt (fuer begehbare 1:1-Gebaeude)
+      //   unit     = 'm' | 'mm' | 'cm'  (TopSolid/FreeCAD/Blender = 'm')
+      //   massstab = Darstellungs-Massstab (1 = 1:1, 100 = 1:100)
+      //   boden    = true -> Unterkante des Modells = realer Fussboden
       // ════════════════════════════════════════════════════════════════
       const GLB_BIBLIOTHEK = [
         { name: 'AR Brille',    src: 'EntwurfARBrille.glb', unit: 'm' },
@@ -29,6 +23,9 @@
       ];
 
       const UNIT_SCALE = { 'mm': 0.001, 'cm': 0.01, 'm': 1.0 };
+
+      // Globale Infos zum geladenen Modell (fuer Flug-Geschwindigkeit etc.)
+      window.AR_MODEL = { maxDim: 0.5, boden: false, basePos: new THREE.Vector3(0, 1.2, -0.6) };
 
       function setHudText(id, text, color) {
         try {
@@ -40,7 +37,6 @@
         } catch (err) { /* nie kritisch */ }
       }
 
-      // Laenge huebsch formatieren: unter 1 m in mm, sonst in m
       function fmtLen(m) {
         return m < 1 ? (m * 1000).toFixed(0) + ' mm' : m.toFixed(2) + ' m';
       }
@@ -51,9 +47,9 @@
       // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('auto-center', {
         schema: {
-          unitScale: { type: 'number',  default: 1.0 },  // GLB-Einheit -> Meter
-          viewScale: { type: 'number',  default: 1.0 },  // Darstellung (1/massstab)
-          boden:     { type: 'boolean', default: false } // Unterkante auf Rig-Boden
+          unitScale: { type: 'number',  default: 1.0 },
+          viewScale: { type: 'number',  default: 1.0 },
+          boden:     { type: 'boolean', default: false }
         },
 
         init: function () {
@@ -66,7 +62,6 @@
               const model = e.detail.model;
               if (!model) return;
 
-              // Sicherstellen, dass alte Skalierung nicht die Box verfaelscht
               this.el.object3D.scale.set(1, 1, 1);
               model.position.set(0, 0, 0);
               model.updateMatrixWorld(true);
@@ -82,7 +77,6 @@
               box.getSize(size);
               box.getCenter(center);
 
-              // Zentrieren (X/Z immer, Y nur wenn nicht "boden")
               model.position.x -= center.x;
               model.position.z -= center.z;
               if (this.data.boden) {
@@ -91,11 +85,9 @@
                 model.position.y -= center.y;       // Mitte auf 0
               }
 
-              // Gesamt-Skalierung = Einheit * Darstellungs-Massstab
               const s = this.data.unitScale * this.data.viewScale;
               this.el.object3D.scale.set(s, s, s);
 
-              // Reale Groesse (Meter) und dargestellte Groesse (Meter)
               const real = { x: size.x * this.data.unitScale,
                              y: size.y * this.data.unitScale,
                              z: size.z * this.data.unitScale };
@@ -109,10 +101,14 @@
               setHudText('#ui-size',
                 fmtLen(real.x) + ' x ' + fmtLen(real.y) + ' x ' + fmtLen(real.z), '#AAFFAA');
 
+              // Globale Modell-Infos aktualisieren
+              const maxDim = Math.max(disp.x, disp.y, disp.z);
+              window.AR_MODEL.maxDim = maxDim;
+              window.AR_MODEL.boden  = this.data.boden;
+
               // Schnittbereich an Modellgroesse anpassen
               const clipEl = document.querySelector('#clip-controller');
               if (clipEl && clipEl.components['clipping-plane']) {
-                const maxDim = Math.max(disp.x, disp.y, disp.z);
                 clipEl.components['clipping-plane'].setRange(Math.max(0.05, maxDim / 2 + 0.02));
               }
 
@@ -133,8 +129,7 @@
 
 
       // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 2: MASS-ANZEIGE (Joystick-Druck)
-      // Wireframe in dargestellter Groesse, Beschriftung mit REALEN Massen
+      // KOMPONENTE 2: MASS-ANZEIGE (Joystick-Druck rechts)
       // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('mass-anzeige', {
         init: function () {
@@ -224,7 +219,7 @@
             if (!cam) return;
 
             cam.getWorldPosition(this.tmpPos);
-            cam.getWorldDirection(this.tmpDir);   // = Blickrichtung, NICHT negieren
+            cam.getWorldDirection(this.tmpDir);   // Blickrichtung, NICHT negieren
             cam.getWorldQuaternion(this.tmpQuat);
 
             this.el.object3D.position.copy(this.tmpPos)
@@ -243,7 +238,7 @@
         init: function () {
           this.plane        = new THREE.Plane();
           this.clipPosition = 0;
-          this.range        = 0.5;   // wird von auto-center gesetzt
+          this.range        = 0.5;
           this.axis         = 'y';
           this.enabled      = false;
           this.ready        = false;
@@ -290,7 +285,6 @@
           }
         },
 
-        // deltaFrac = Anteil des Bereichs pro Frame (z.B. 0.01 = 1 %)
         move: function (deltaFrac) {
           this.clipPosition += deltaFrac * this.range;
           this.clipPosition = Math.max(-this.range, Math.min(this.range, this.clipPosition));
@@ -322,7 +316,7 @@
 
 
       // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 5: GLB BIBLIOTHEK (GRIP oeffnet)
+      // KOMPONENTE 5: GLB BIBLIOTHEK (GRIP rechts oeffnet)
       // ════════════════════════════════════════════════════════════════
       AFRAME.registerComponent('bibliothek-menu', {
         init: function () {
@@ -426,11 +420,9 @@
 
             setHudText('#ui-size', 'Modell laedt...', '#FFAA00');
 
-            // Rig zuruecksetzen: Drehung raus, Position je nach Modus
             rigEl.object3D.quaternion.set(0, 0, 0, 1);
             document.querySelector('#model-node').object3D.rotation.set(0, 0, 0);
             if (boden) {
-              // Auf den realen Fussboden, 1.5 m vor dem Nutzer
               const cam = this.el.sceneEl.camera;
               if (cam) {
                 cam.getWorldPosition(this.tmpPos);
@@ -444,6 +436,10 @@
             } else {
               rigEl.object3D.position.set(0, 1.2, -0.6);
             }
+
+            // Basis-Position merken (fuer "zurueck auf Boden" und Hoehen-Anzeige)
+            window.AR_MODEL.basePos.copy(rigEl.object3D.position);
+            setHudText('#ui-hoehe', 'Hoehe: 0.00 m', '#BBBBBB');
 
             modelEl.setAttribute('auto-center',
               'unitScale: ' + unitScale + '; viewScale: ' + viewScale + '; boden: ' + boden);
@@ -478,7 +474,98 @@
 
 
       // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 6: AR-STEUERUNG
+      // KOMPONENTE 6: FLUG-STEUERUNG (LINKER Controller)
+      //
+      // In AR kann man nicht physisch in den 2. Stock. Der Trick:
+      // Das MODELL wird verschoben -> fuehlt sich an wie Fliegen.
+      //
+      // Linker Stick     = vor/zurueck/links/rechts (in Blickrichtung)
+      // X-Taste halten   = aufsteigen (Modell sinkt)
+      // Y-Taste halten   = absinken   (Modell steigt)
+      // Linker Grip      = zurueck auf Boden-Niveau / Startposition
+      //
+      // Geschwindigkeit passt sich der Modellgroesse an.
+      // ════════════════════════════════════════════════════════════════
+      AFRAME.registerComponent('flug-steuerung', {
+        init: function () {
+          this.rig     = document.querySelector('#rig').object3D;
+          this.stickX  = 0;
+          this.stickY  = 0;
+          this.upHeld  = false;
+          this.downHeld = false;
+          this.deadzone = 0.2;
+
+          this.tmpFwd   = new THREE.Vector3();
+          this.tmpRight = new THREE.Vector3();
+          this.tmpUp    = new THREE.Vector3(0, 1, 0);
+          this.tmpMove  = new THREE.Vector3();
+
+          this.el.addEventListener('thumbstickmoved', (evt) => {
+            this.stickX = evt.detail.x || 0;
+            this.stickY = evt.detail.y || 0;
+          });
+
+          this.el.addEventListener('xbuttondown', () => { this.upHeld = true;  });
+          this.el.addEventListener('xbuttonup',   () => { this.upHeld = false; });
+          this.el.addEventListener('ybuttondown', () => { this.downHeld = true;  });
+          this.el.addEventListener('ybuttonup',   () => { this.downHeld = false; });
+
+          // Grip links: zurueck zur Basis-Position (Boden-Niveau)
+          this.el.addEventListener('gripdown', () => {
+            this.rig.position.copy(window.AR_MODEL.basePos);
+            this._updateHud();
+          });
+        },
+
+        // Geschwindigkeit pro Frame, abhaengig von Modellgroesse
+        _speed: function () {
+          const d = window.AR_MODEL.maxDim || 0.5;
+          return Math.min(0.04, Math.max(0.003, d * 0.001));
+        },
+
+        _updateHud: function () {
+          // Virtuelle Hoehe = wie weit das Modell unter seine Basis geschoben wurde
+          const h = window.AR_MODEL.basePos.y - this.rig.position.y;
+          const col = Math.abs(h) < 0.005 ? '#BBBBBB' : '#FF88FF';
+          setHudText('#ui-hoehe', 'Hoehe: ' + (h >= 0 ? '+' : '') + h.toFixed(2) + ' m', col);
+        },
+
+        tick: function () {
+          try {
+            const moveX = Math.abs(this.stickX) > this.deadzone ? this.stickX : 0;
+            const moveY = Math.abs(this.stickY) > this.deadzone ? this.stickY : 0;
+            const vert  = (this.upHeld ? 1 : 0) - (this.downHeld ? 1 : 0);
+
+            if (moveX === 0 && moveY === 0 && vert === 0) return;
+
+            const cam = this.el.sceneEl.camera;
+            if (!cam) return;
+
+            const sp = this._speed();
+
+            // Blickrichtung horizontal
+            cam.getWorldDirection(this.tmpFwd);
+            this.tmpFwd.y = 0;
+            if (this.tmpFwd.lengthSq() < 0.0001) this.tmpFwd.set(0, 0, -1);
+            this.tmpFwd.normalize();
+            this.tmpRight.crossVectors(this.tmpFwd, this.tmpUp).normalize();
+
+            // "Ich fliege vorwaerts" = Modell kommt auf mich zu (Gegenrichtung).
+            // Stick nach oben liefert y < 0  ->  Modell entlang -Blickrichtung
+            this.tmpMove.set(0, 0, 0);
+            this.tmpMove.addScaledVector(this.tmpFwd,    moveY * sp);
+            this.tmpMove.addScaledVector(this.tmpRight, -moveX * sp);
+            this.tmpMove.y = -vert * sp;   // aufsteigen = Modell nach unten
+
+            this.rig.position.add(this.tmpMove);
+            this._updateHud();
+          } catch (err) { /* nie kritisch */ }
+        }
+      });
+
+
+      // ════════════════════════════════════════════════════════════════
+      // KOMPONENTE 7: AR-STEUERUNG (RECHTER Controller)
       //
       // Trigger (auf Box zeigen) = Greifen: bewegen 1:1, drehen um sich selbst
       // Grip                     = Bibliothek
@@ -535,7 +622,6 @@
           this._getMenu = getMenu;
           this._getClip = getClip;
 
-          // --- TRIGGER ---
           this.controller.addEventListener('triggerdown', () => {
             const menu = getMenu();
             if (menu && menu.visible) {
@@ -561,13 +647,11 @@
             this.isGrabbed = false;
           });
 
-          // --- GRIP: Bibliothek ---
           this.controller.addEventListener('gripdown', () => {
             const m = getMenu();
             if (m) m.toggle();
           });
 
-          // --- STICK DRUECKEN: Mass-Anzeige ---
           this.controller.addEventListener('thumbstickdown', () => {
             const mass = getMass();
             if (mass) {
@@ -577,13 +661,11 @@
             }
           });
 
-          // --- JOYSTICK ---
           this.controller.addEventListener('thumbstickmoved', (evt) => {
             this.stickX = evt.detail.x || 0;
             this.stickY = evt.detail.y || 0;
           });
 
-          // --- A: Schnitt EIN/AUS ---
           this.controller.addEventListener('abuttondown', () => {
             const c = getClip();
             if (c) {
@@ -593,7 +675,6 @@
             }
           });
 
-          // --- B: Achse wechseln ---
           this.controller.addEventListener('bbuttondown', () => {
             const c = getClip();
             if (c) {
@@ -616,7 +697,6 @@
           const menu = this._getMenu ? this._getMenu() : null;
           const clip = this._getClip ? this._getClip() : null;
 
-          // --- Bibliothek offen ---
           if (menu && menu.visible) {
             if (this.stickCool <= 0 && Math.abs(this.stickY) > this.deadzone) {
               if (this.stickY > this.deadzone) menu.navigateDown();
@@ -627,7 +707,6 @@
             return;
           }
 
-          // --- GEGRIFFEN ---
           if (this.isGrabbed) {
             this.controller.object3D.getWorldPosition(this.tmpCtrlPos);
             this.controller.object3D.getWorldQuaternion(this.tmpCtrlQuat);
@@ -641,12 +720,10 @@
             return;
           }
 
-          // --- Rotation per Stick ---
           if (Math.abs(this.stickX) > this.deadzone) {
             this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
           }
 
-          // --- Stick Y: Schnittebene ODER Zoom ---
           if (Math.abs(this.stickY) > this.deadzone) {
             if (clip && clip.enabled) {
               clip.move(this.stickY * -0.012);
@@ -700,21 +777,25 @@
 
       <!-- HUD -->
       <a-entity id="hud" hud-follow="distance: 0.8; offsetY: -0.22">
-        <a-plane width="0.55" height="0.28" color="#111122" opacity="0.75"></a-plane>
+        <a-plane width="0.6" height="0.32" color="#111122" opacity="0.75"></a-plane>
         <a-text id="ui-modell-name" value="AR Brille  (EntwurfARBrille.glb)"
-                align="center" color="#FFD700" width="1.1" position="0 0.10 0.001"></a-text>
+                align="center" color="#FFD700" width="1.1" position="0 0.12 0.001"></a-text>
         <a-text id="ui-scale-info" value="Massstab 1:1  |  Einheit: m"
-                align="center" color="#00CCFF" width="0.9" position="0 0.06 0.001"></a-text>
+                align="center" color="#00CCFF" width="0.9" position="0 0.08 0.001"></a-text>
         <a-text id="ui-size" value="Modell laedt..."
-                align="center" color="#FFAA00" width="0.85" position="0 0.02 0.001"></a-text>
+                align="center" color="#FFAA00" width="0.85" position="0 0.04 0.001"></a-text>
+        <a-text id="ui-hoehe" value="Hoehe: 0.00 m"
+                align="center" color="#BBBBBB" width="0.8" position="0 0.00 0.001"></a-text>
         <a-text id="ui-schnitt" value="Schnitt: AUS"
-                align="center" color="#BBBBBB" width="0.8" position="0 -0.02 0.001"></a-text>
+                align="center" color="#BBBBBB" width="0.8" position="0 -0.04 0.001"></a-text>
         <a-text id="ui-axis" value="Achse: Y"
-                align="center" color="#BBBBBB" width="0.7" position="0 -0.05 0.001"></a-text>
+                align="center" color="#BBBBBB" width="0.7" position="0 -0.07 0.001"></a-text>
         <a-text id="ui-masse" value="Masse: AUS"
-                align="center" color="#BBBBBB" width="0.7" position="0 -0.08 0.001"></a-text>
-        <a-text value="Grip: Bibliothek | A: Schnitt | B: Achse | Stick-Druck: Masse"
-                align="center" color="#777777" width="0.85" position="0 -0.12 0.001"></a-text>
+                align="center" color="#BBBBBB" width="0.7" position="0 -0.10 0.001"></a-text>
+        <a-text value="R: Grip Bibliothek | A Schnitt | B Achse | Stick-Druck Masse"
+                align="center" color="#777777" width="0.85" position="0 -0.13 0.001"></a-text>
+        <a-text value="L: Stick Fliegen | X hoch | Y runter | Grip Boden"
+                align="center" color="#777777" width="0.85" position="0 -0.155 0.001"></a-text>
       </a-entity>
 
       <!-- RIG: Grab-Box + Modell -->
@@ -742,13 +823,19 @@
       <!-- Clipping Plane -->
       <a-entity id="clip-controller" clipping-plane></a-entity>
 
-      <!-- CONTROLLER (rechts) -->
+      <!-- RECHTER CONTROLLER: Greifen, Bibliothek, Schnitt, Masse -->
       <a-entity id="controller-right"
                 oculus-touch-controls="hand: right"
                 raycaster="objects: .grabbable; showLine: true; far: 100"
                 line="color: yellow; opacity: 1"
                 bibliothek-menu
                 ar-steuerung>
+      </a-entity>
+
+      <!-- LINKER CONTROLLER: Fliegen / Hoehe -->
+      <a-entity id="controller-left"
+                oculus-touch-controls="hand: left"
+                flug-steuerung>
       </a-entity>
 
       <!-- Freie Hand (nur Darstellung) -->
