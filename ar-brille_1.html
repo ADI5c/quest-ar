@@ -1,848 +1,547 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>AR Viewer - Greifen, Schnitt, Masse & Fliegen</title>
-    <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Neubau VR – Popp Metallbau</title>
+<style>
+  :root{
+    --bg:#10131a; --panel:rgba(18,22,30,.86); --line:rgba(255,255,255,.12);
+    --fg:#e8ecf2; --dim:#96a0b0; --acc:#ff8c1a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
+  a-scene{position:fixed;inset:0}
 
-    <script>
+  /* ---------- Ladebildschirm ---------- */
+  #boot{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:18px;background:var(--bg);
+    transition:opacity .5s;text-align:center;padding:24px}
+  #boot h1{margin:0;font-size:20px;font-weight:600;letter-spacing:.2px}
+  #boot p{margin:0;color:var(--dim);font-size:13px;max-width:34ch}
+  #bar{width:min(300px,70vw);height:4px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden}
+  #bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+  #boot.hide{opacity:0;pointer-events:none}
+  #pick{margin-top:6px}
+  button,select{font:inherit;color:var(--fg);background:rgba(255,255,255,.08);
+    border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
+  button:hover{background:rgba(255,255,255,.14)}
 
-      // ════════════════════════════════════════════════════════════════
-      // GLB BIBLIOTHEK
-      //
-      //   name     = Anzeigename im Menue
-      //   src      = Dateiname (gleicher Ordner wie diese HTML)
-      //   unit     = 'm' | 'mm' | 'cm'  (TopSolid/FreeCAD/Blender = 'm')
-      //   massstab = Darstellungs-Massstab (1 = 1:1, 100 = 1:100)
-      //   boden    = true -> Unterkante des Modells = realer Fussboden
-      // ════════════════════════════════════════════════════════════════
-      const GLB_BIBLIOTHEK = [
-        { name: 'AR Brille',    src: 'EntwurfARBrille.glb', unit: 'm' },
-        { name: 'Neubau 1:100', src: 'neubau.glb',          unit: 'm', massstab: 100 },
-        { name: 'Neubau 1:1',   src: 'neubau.glb',          unit: 'm', massstab: 1, boden: true },
-      ];
+  /* ---------- Bedienpanel ---------- */
+  #ui{position:fixed;top:12px;left:12px;z-index:40;width:250px;max-height:calc(100vh - 24px);
+    overflow:auto;background:var(--panel);backdrop-filter:blur(14px);
+    border:1px solid var(--line);border-radius:14px;padding:12px 13px;
+    box-shadow:0 12px 40px rgba(0,0,0,.45)}
+  #ui.min{width:auto;padding:8px 10px}
+  #ui.min .body{display:none}
+  .hd{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .hd b{font-size:13px;font-weight:600}
+  .hd button{padding:2px 8px;line-height:1.4}
+  h3{margin:14px 0 6px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  label.row{display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer;font-size:13px}
+  label.row input{accent-color:var(--acc);width:15px;height:15px}
+  .sw{width:10px;height:10px;border-radius:3px;flex:none}
+  .sl{display:grid;grid-template-columns:1fr auto;gap:2px 8px;align-items:center;margin:7px 0;font-size:12px;color:var(--dim)}
+  .sl input{grid-column:1/3;width:100%;accent-color:var(--acc)}
+  .btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}
+  .btns button{padding:6px 4px;font-size:12px}
+  .note{color:var(--dim);font-size:11.5px;line-height:1.5;margin-top:10px;
+    border-top:1px solid var(--line);padding-top:9px}
+  .note b{color:var(--fg);font-weight:600}
+  kbd{font:11px ui-monospace,monospace;background:rgba(255,255,255,.1);
+    border:1px solid var(--line);border-radius:4px;padding:0 4px}
+  #hud{position:fixed;right:12px;bottom:12px;z-index:40;color:var(--dim);font:11px ui-monospace,monospace;
+    background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 9px}
+  @media (max-width:640px){#ui{width:calc(100vw - 24px)}}
+</style>
+</head>
+<body>
 
-      const UNIT_SCALE = { 'mm': 0.001, 'cm': 0.01, 'm': 1.0 };
+<div id="boot">
+  <h1>Neubau – VR Rundgang</h1>
+  <div id="bar"><i></i></div>
+  <p id="bootmsg">Modell wird geladen …</p>
+  <div id="pick" hidden>
+    <input type="file" id="file" accept=".glb,.gltf" hidden>
+    <button onclick="document.getElementById('file').click()">GLB-Datei wählen</button>
+  </div>
+</div>
 
-      // Globale Infos zum geladenen Modell (fuer Flug-Geschwindigkeit etc.)
-      window.AR_MODEL = { maxDim: 0.5, boden: false, basePos: new THREE.Vector3(0, 1.2, -0.6) };
+<div id="ui" hidden>
+  <div class="hd"><b>Neubau · Halle</b><button id="minb" title="Panel ein-/ausklappen">–</button></div>
+  <div class="body">
 
-      function setHudText(id, text, color) {
-        try {
-          const el = document.querySelector(id);
-          if (el) {
-            el.setAttribute('value', text);
-            if (color) el.setAttribute('color', color);
+    <h3>Ebenen</h3>
+    <label class="row"><input type="checkbox" data-layer="gebaeude" checked><span class="sw" style="background:#c9c6c0"></span>Gebäude &amp; Boden</label>
+    <label class="row"><input type="checkbox" data-layer="stahlbau" checked><span class="sw" style="background:#6d7378"></span>Stahlbau &amp; Treppe</label>
+    <label class="row"><input type="checkbox" data-layer="maschinen" checked><span class="sw" style="background:#a03428"></span>Maschinen &amp; Kran</label>
+    <label class="row"><input type="checkbox" data-layer="personen" checked><span class="sw" style="background:#3d4c5e"></span>Personen (1.85 m)</label>
+    <label class="row"><input type="checkbox" data-layer="planung" checked><span class="sw" style="background:#ff8c1a"></span>Planungsflächen</label>
+
+    <h3>Licht</h3>
+    <div class="sl"><span>Sonnenrichtung</span><span id="vaz">135°</span><input type="range" id="az" min="0" max="360" value="135"></div>
+    <div class="sl"><span>Sonnenhöhe</span><span id="vel">42°</span><input type="range" id="el" min="8" max="85" value="42"></div>
+    <div class="sl"><span>Belichtung</span><span id="vex">1.00</span><input type="range" id="ex" min="40" max="200" value="100"></div>
+    <label class="row"><input type="checkbox" id="sh" checked>Schlagschatten</label>
+
+    <h3>Ansicht</h3>
+    <div class="btns">
+      <button data-view="start">Halle innen</button>
+      <button data-view="bird">Vogelperspektive</button>
+      <button data-view="saw">Halle längs</button>
+      <button data-view="doll">Puppenhaus 1:20</button>
+    </div>
+    <label class="row" style="margin-top:6px"><input type="checkbox" id="fly">Freiflug (Desktop)</label>
+
+    <div class="note">
+      <b>Desktop:</b> <kbd>W A S D</kbd> gehen, Maus ziehen = umsehen.<br>
+      <b>VR (Quest):</b> linker Stick gehen, rechter Stick 30°-Drehung,
+      rechter Trigger = Teleport, <kbd>A</kbd> Planungsflächen,
+      <kbd>B</kbd> Puppenhaus, <kbd>X</kbd> Startposition, <kbd>Y</kbd> Sonne.
+    </div>
+  </div>
+</div>
+
+<div id="hud" hidden></div>
+
+<script>
+/* ------------------------------------------------------------------ *
+ *  A-Frame laden: lokal (offline) → sonst CDN-Kette
+ * ------------------------------------------------------------------ */
+const AFRAME_URLS = [
+  './aframe.min.js',                                                  // lokal, falls danebengelegt (offline)
+  'https://cdn.jsdelivr.net/npm/aframe@1.8.0/dist/aframe-v1.8.0.min.js',
+  'https://unpkg.com/aframe@1.8.0/dist/aframe-v1.8.0.min.js',
+  'https://cdnjs.cloudflare.com/ajax/libs/aframe/1.8.0/aframe.min.js',
+  'https://aframe.io/releases/1.7.0/aframe.min.js'
+];
+function loadSeq(list, i = 0) {
+  return new Promise((res, rej) => {
+    if (i >= list.length) return rej(new Error('A-Frame konnte nicht geladen werden'));
+    const s = document.createElement('script');
+    s.src = list[i];
+    s.onload = () => res();
+    s.onerror = () => res(loadSeq(list, i + 1));
+    document.head.appendChild(s);
+  });
+}
+
+/* Modellquelle: ?model=… oder Datei daneben */
+const PARAMS = new URLSearchParams(location.search);
+const MODEL_URL = PARAMS.get('model') || 'neubau_pbr.glb';
+
+/* Geometrie der Halle (Weltkoordinaten aus TopSolid, Meter) */
+const FLOOR = 3.57;                 // Oberkante Bodenplatte
+const GALLERY = 9.32;               // Oberkante Galerie
+const CENTER = { x: 17.75, z: 8.5 };
+const VIEWS = {
+  start: { p: [8.5, FLOOR, 4.5], r: -78, pitch: 0 },
+  saw:   { p: [27.5, FLOOR, 13.5], r: 68, pitch: 2 },
+  bird:  { p: [-7, FLOOR + 26, -7], r: -125, pitch: -46 }
+};
+
+const bar = document.querySelector('#bar i');
+const bootmsg = document.getElementById('bootmsg');
+
+/* Modell vorab laden, damit es einen Fortschritt gibt */
+function fetchModel(url) {
+  return new Promise((res, rej) => {
+    const x = new XMLHttpRequest();
+    x.open('GET', url); x.responseType = 'blob';
+    x.onprogress = e => { if (e.lengthComputable) bar.style.width = (e.loaded / e.total * 100) + '%'; };
+    x.onload = () => x.status < 400 ? res(URL.createObjectURL(x.response)) : rej(new Error(x.status));
+    x.onerror = () => rej(new Error('Netzwerkfehler'));
+    x.send();
+  });
+}
+
+let modelBlob = null;
+Promise.all([
+  loadSeq(AFRAME_URLS),
+  fetchModel(MODEL_URL).then(u => modelBlob = u).catch(err => {
+    bootmsg.innerHTML = 'Modell <code>' + MODEL_URL + '</code> nicht gefunden.<br>Bitte GLB manuell wählen.';
+    document.getElementById('pick').hidden = false;
+  })
+]).then(() => { if (modelBlob) start(modelBlob); });
+
+document.getElementById('file').addEventListener('change', e => {
+  const f = e.target.files[0];
+  if (f) { document.getElementById('pick').hidden = true; start(URL.createObjectURL(f)); }
+});
+
+/* ------------------------------------------------------------------ *
+ *  Szene
+ * ------------------------------------------------------------------ */
+function start(modelURL) {
+  bootmsg.textContent = 'Szene wird aufgebaut …';
+  bar.style.width = '100%';
+
+  /* ---------- prozedurale HDR-Umgebung (Himmel + Sonne) ---------- */
+  function envTexture(sunDir, W = 256, H = 128) {
+    const data = new Float32Array(W * H * 4);
+    const mix = (a, b, t) => a + (b - a) * t;
+    for (let y = 0; y < H; y++) {
+      const v = (y + 0.5) / H;                      // 0 = unten
+      const elev = (v - 0.5) * Math.PI;             // -90° … +90°
+      const cy = Math.sin(elev), ce = Math.cos(elev);
+      for (let x = 0; x < W; x++) {
+        const u = (x + 0.5) / W;
+        const phi = (u - 0.5) * 2 * Math.PI;        // three: u = atan2(-z, x)/2π + .5
+        const dx = Math.cos(phi) * ce, dz = -Math.sin(phi) * ce;
+        let r, g, b;
+        if (cy >= 0) {                              // Himmel
+          const t = Math.pow(1 - cy, 2.2);
+          r = mix(0.30, 0.86, t) * 1.0;
+          g = mix(0.48, 0.90, t) * 1.0;
+          b = mix(0.86, 0.95, t) * 1.0;
+          const cos = dx * sunDir.x + cy * sunDir.y + dz * sunDir.z;
+          const ang = Math.acos(Math.min(1, Math.max(-1, cos)));
+          if (ang < 0.05) { r = 780; g = 720; b = 610; }
+          else if (ang < 0.7) {
+            const gl = Math.pow(1 - ang / 0.7, 4) * 22;
+            r += gl; g += gl * 0.93; b += gl * 0.78;
           }
-        } catch (err) { /* nie kritisch */ }
+        } else {                                    // Boden / Umgebung
+          const t = Math.min(1, -cy * 2.5);
+          const s = mix(0.30, 0.10, t);
+          r = s * 0.95; g = s * 0.92; b = s * 0.86;
+        }
+        const i = (y * W + x) * 4;
+        data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 1;
+      }
+    }
+    const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.LinearSRGBColorSpace;
+    tex.minFilter = tex.magFilter = THREE.LinearFilter;
+    tex.generateMipmaps = false;
+    tex.needsUpdate = true;
+    return tex;
+  }
+
+  /* ---------- Hauptkomponente ---------- */
+  AFRAME.registerComponent('hall', {
+    init() {
+      const sceneEl = this.el;
+      this.layers = {};
+      this.shadowCasters = [];
+      sceneEl.addEventListener('loaded', () => this.setup());
+    },
+
+    setup() {
+      const sceneEl = this.el;
+      const r = sceneEl.renderer, scene = sceneEl.object3D;
+      r.toneMapping = THREE.ACESFilmicToneMapping;
+      r.toneMappingExposure = 1.0;
+      r.shadowMap.enabled = true;
+      r.shadowMap.type = THREE.PCFShadowMap;
+      if (r.xr && r.xr.setFoveation) { try { r.xr.setFoveation(0.6); } catch (e) {} }
+
+      this.pmrem = new THREE.PMREMGenerator(r);
+
+      /* Sonne */
+      this.sun = new THREE.DirectionalLight(0xfff1dd, 2.8);
+      this.sun.castShadow = true;
+      const s = this.sun.shadow;
+      s.mapSize.set(2048, 2048);
+      s.camera.left = -30; s.camera.right = 30;
+      s.camera.top = 30; s.camera.bottom = -30;
+      s.camera.near = 10; s.camera.far = 170;
+      s.bias = -0.0006; s.normalBias = 0.035;
+      this.sunTarget = new THREE.Object3D();
+      this.sunTarget.position.set(CENTER.x, FLOOR + 3, CENTER.z);
+      scene.add(this.sunTarget, this.sun);
+      this.sun.target = this.sunTarget;
+
+      /* Füll-Licht (Himmel/Boden), das Environment macht den Rest */
+      scene.add(new THREE.HemisphereLight(0xbed6f2, 0x6d665c, 0.12));
+
+      /* Aussenboden – 2 cm unter der Bodenplatte, kein Z-Fighting */
+      const gmat = new THREE.MeshStandardMaterial({ color: 0x5d5850, roughness: 1.0, metalness: 0 });
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), gmat);
+      ground.rotation.x = -Math.PI / 2;
+      ground.position.set(CENTER.x, FLOOR - 0.02, CENTER.z);
+      ground.receiveShadow = true;
+      scene.add(ground);
+      this.ground = ground;
+
+      this.setSun(135, 42);
+      r.shadowMap.autoUpdate = false;
+      r.shadowMap.needsUpdate = true;
+      this.el.emit('hall-ready');
+    },
+
+    setSun(azDeg, elDeg) {
+      const az = azDeg * Math.PI / 180, ev = elDeg * Math.PI / 180;
+      const d = new THREE.Vector3(Math.cos(ev) * Math.sin(az), Math.sin(ev), Math.cos(ev) * Math.cos(az));
+      this.sunDir = d;
+      this.sun.position.copy(this.sunTarget.position).addScaledVector(d, 90);
+      this.sun.intensity = 0.6 + 2.6 * Math.max(0.12, Math.sin(ev));
+
+      const tex = envTexture(d);
+      const env = this.pmrem.fromEquirectangular(tex).texture;
+      const scene = this.el.object3D;
+      if (scene.environment) scene.environment.dispose();
+      if (scene.background && scene.background.isTexture) scene.background.dispose();
+      scene.environment = env;
+      scene.background = tex;
+      scene.environmentIntensity = 0.70;
+      this.el.renderer.shadowMap.needsUpdate = true;
+    },
+
+    setShadows(on) {
+      this.sun.castShadow = on;
+      this.el.renderer.shadowMap.needsUpdate = true;
+    },
+
+    refresh() { this.el.renderer.shadowMap.needsUpdate = true; }
+  });
+
+  /* ---------- Modell: Ebenen, Schatten, Transparenzen ---------- */
+  AFRAME.registerComponent('model-setup', {
+    init() {
+      this.el.addEventListener('model-loaded', e => {
+        const root = e.detail.model, hall = this.el.sceneEl.components.hall;
+        const groups = {};
+        let tris = 0;
+        root.traverse(o => {
+          if (!o.isMesh) return;
+          const layer = o.userData.layer || (o.parent && o.parent.userData.layer) || 'gebaeude';
+          (groups[layer] = groups[layer] || []).push(o);
+          const g = o.geometry;
+          tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+          const m = o.material;
+          m.envMapIntensity = 1.0;
+          if (m.transparent || (m.opacity !== undefined && m.opacity < 1)) {
+            m.depthWrite = false;
+            m.side = THREE.DoubleSide;
+            o.renderOrder = 3;
+            o.castShadow = o.receiveShadow = false;
+          } else {
+            o.castShadow = true;
+            o.receiveShadow = true;
+          }
+        });
+        hall.layers = groups;
+        this.el.sceneEl.emit('model-ready', { tris: Math.round(tris) });
+      });
+    }
+  });
+
+  /* ---------- Fortbewegung in VR ---------- */
+  AFRAME.registerComponent('locomotion', {
+    schema: { speed: { default: 2.6 } },
+    init() {
+      this.rig = this.el.object3D;
+      this.camEl = document.getElementById('cam');
+      this.move = { x: 0, y: 0 };
+      this.turn = 0; this.turnArmed = true;
+      this.boost = 1;
+      this.tmp = new THREE.Vector3();
+      this.q = new THREE.Quaternion();
+
+      const L = document.getElementById('hand-l'), R = document.getElementById('hand-r');
+      L.addEventListener('thumbstickmoved', e => { this.move.x = e.detail.x; this.move.y = e.detail.y; });
+      R.addEventListener('thumbstickmoved', e => { this.turn = e.detail.x; });
+      L.addEventListener('gripdown', () => this.boost = 2.6);
+      L.addEventListener('gripup', () => this.boost = 1);
+      R.addEventListener('abuttondown', () => window.toggleLayer('planung'));
+      R.addEventListener('bbuttondown', () => window.setView('doll'));
+      L.addEventListener('xbuttondown', () => window.setView('start'));
+      L.addEventListener('ybuttondown', () => window.cycleSun());
+
+      /* Teleport mit rechtem Trigger */
+      this.ray = new THREE.Raycaster();
+      this.targets = [];
+      ['floor', 'gallery'].forEach((n, i) => {
+        const p = new THREE.Mesh(new THREE.PlaneGeometry(400, 400),
+          new THREE.MeshBasicMaterial({ visible: false }));
+        p.rotation.x = -Math.PI / 2;
+        p.position.set(CENTER.x, i ? GALLERY : FLOOR, CENTER.z);
+        this.el.sceneEl.object3D.add(p);
+        this.targets.push(p);
+      });
+      this.marker = document.getElementById('tpmark');
+      R.addEventListener('triggerdown', () => { this.aiming = true; });
+      R.addEventListener('triggerup', () => { this.aiming = false; this.doTeleport(); });
+      this.rHand = R;
+    },
+
+    aimPoint() {
+      const o = this.rHand.object3D;
+      const origin = new THREE.Vector3(), dir = new THREE.Vector3(0, 0, -1);
+      o.getWorldPosition(origin);
+      dir.applyQuaternion(o.getWorldQuaternion(this.q)).normalize();
+      this.ray.set(origin, dir);
+      const hit = this.ray.intersectObjects(this.targets, false)[0];
+      return hit && hit.distance < 60 ? hit.point : null;
+    },
+
+    doTeleport() {
+      const p = this.lastAim;
+      this.marker.setAttribute('visible', false);
+      if (!p) return;
+      const cam = new THREE.Vector3();
+      this.camEl.object3D.getWorldPosition(cam);
+      this.rig.position.x += p.x - cam.x;
+      this.rig.position.z += p.z - cam.z;
+      this.rig.position.y = p.y;
+    },
+
+    tick(t, dt) {
+      const d = Math.min(dt, 60) / 1000;
+
+      if (this.aiming) {
+        const p = this.aimPoint();
+        this.lastAim = p;
+        this.marker.setAttribute('visible', !!p);
+        if (p) this.marker.object3D.position.set(p.x, p.y + 0.02, p.z);
       }
 
-      function fmtLen(m) {
-        return m < 1 ? (m * 1000).toFixed(0) + ' mm' : m.toFixed(2) + ' m';
+      if (Math.abs(this.move.x) > 0.12 || Math.abs(this.move.y) > 0.12) {
+        const yaw = new THREE.Euler().setFromQuaternion(
+          this.camEl.object3D.getWorldQuaternion(this.q), 'YXZ').y;
+        const sp = this.data.speed * this.boost * d;
+        this.rig.position.x += (Math.sin(yaw) * -this.move.y + Math.cos(yaw) * this.move.x) * sp;
+        this.rig.position.z += (Math.cos(yaw) * -this.move.y - Math.sin(yaw) * this.move.x) * sp;
       }
 
-
-      // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 1: AUTO-CENTER + MASSSTAB + BODEN + MASSE MELDEN
-      // ════════════════════════════════════════════════════════════════
-      AFRAME.registerComponent('auto-center', {
-        schema: {
-          unitScale: { type: 'number',  default: 1.0 },
-          viewScale: { type: 'number',  default: 1.0 },
-          boden:     { type: 'boolean', default: false }
-        },
-
-        init: function () {
-          this.el.addEventListener('model-error', () => {
-            setHudText('#ui-size', 'FEHLER: GLB nicht gefunden!', '#FF4444');
-          });
-
-          this.el.addEventListener('model-loaded', (e) => {
-            try {
-              const model = e.detail.model;
-              if (!model) return;
-
-              this.el.object3D.scale.set(1, 1, 1);
-              model.position.set(0, 0, 0);
-              model.updateMatrixWorld(true);
-
-              const box = new THREE.Box3().setFromObject(model);
-              if (box.isEmpty()) {
-                console.warn('Das 3D-Modell ist leer.');
-                return;
-              }
-
-              const size   = new THREE.Vector3();
-              const center = new THREE.Vector3();
-              box.getSize(size);
-              box.getCenter(center);
-
-              model.position.x -= center.x;
-              model.position.z -= center.z;
-              if (this.data.boden) {
-                model.position.y -= box.min.y;      // Unterkante auf 0
-              } else {
-                model.position.y -= center.y;       // Mitte auf 0
-              }
-
-              const s = this.data.unitScale * this.data.viewScale;
-              this.el.object3D.scale.set(s, s, s);
-
-              const real = { x: size.x * this.data.unitScale,
-                             y: size.y * this.data.unitScale,
-                             z: size.z * this.data.unitScale };
-              const disp = { x: real.x * this.data.viewScale,
-                             y: real.y * this.data.viewScale,
-                             z: real.z * this.data.viewScale };
-
-              console.log('Modell | real: ' + fmtLen(real.x) + ' x ' + fmtLen(real.y)
-                + ' x ' + fmtLen(real.z) + ' | dargestellt: ' + fmtLen(disp.x)
-                + ' x ' + fmtLen(disp.y) + ' x ' + fmtLen(disp.z));
-              setHudText('#ui-size',
-                fmtLen(real.x) + ' x ' + fmtLen(real.y) + ' x ' + fmtLen(real.z), '#AAFFAA');
-
-              // Globale Modell-Infos aktualisieren
-              const maxDim = Math.max(disp.x, disp.y, disp.z);
-              window.AR_MODEL.maxDim = maxDim;
-              window.AR_MODEL.boden  = this.data.boden;
-
-              // Schnittbereich an Modellgroesse anpassen
-              const clipEl = document.querySelector('#clip-controller');
-              if (clipEl && clipEl.components['clipping-plane']) {
-                clipEl.components['clipping-plane'].setRange(Math.max(0.05, maxDim / 2 + 0.02));
-              }
-
-              // Mass-Anzeige am Objekt aktualisieren
-              const mn = document.querySelector('#model-node');
-              if (mn && mn.components['mass-anzeige']) {
-                const off = this.el.object3D.position;
-                const centerY = this.data.boden ? off.y + disp.y / 2 : off.y;
-                mn.components['mass-anzeige'].rebuild(disp, real,
-                  { x: off.x, y: centerY, z: off.z });
-              }
-            } catch (err) {
-              console.error('auto-center Fehler:', err);
-            }
-          });
+      if (Math.abs(this.turn) > 0.7) {
+        if (this.turnArmed) {
+          this.turnArmed = false;
+          const ang = this.turn > 0 ? -Math.PI / 6 : Math.PI / 6;
+          const cam = this.camEl.object3D.getWorldPosition(new THREE.Vector3());
+          const off = this.rig.position.clone().sub(cam).applyAxisAngle(new THREE.Vector3(0, 1, 0), ang);
+          this.rig.position.copy(cam.add(off));
+          this.rig.rotation.y += ang;
         }
-      });
-
-
-      // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 2: MASS-ANZEIGE (Joystick-Druck rechts)
-      // ════════════════════════════════════════════════════════════════
-      AFRAME.registerComponent('mass-anzeige', {
-        init: function () {
-          this.visible = false;
-          this.holder  = null;
-        },
-
-        rebuild: function (disp, real, center) {
-          try {
-            if (this.holder && this.holder.parentNode) {
-              this.holder.parentNode.removeChild(this.holder);
-            }
-
-            this.holder = document.createElement('a-entity');
-            this.holder.setAttribute('position', center.x + ' ' + center.y + ' ' + center.z);
-            this.el.appendChild(this.holder);
-
-            const wf = document.createElement('a-box');
-            wf.setAttribute('width',  disp.x);
-            wf.setAttribute('height', disp.y);
-            wf.setAttribute('depth',  disp.z);
-            wf.setAttribute('material',
-              'wireframe: true; color: #00FFAA; opacity: 0.9; transparent: true');
-            this.holder.appendChild(wf);
-
-            const tw = (d) => Math.min(Math.max(0.6, d * 2), 10);
-            const gap = Math.max(0.03, Math.max(disp.x, disp.y, disp.z) * 0.06);
-
-            const tx = document.createElement('a-text');
-            tx.setAttribute('value', 'B: ' + fmtLen(real.x));
-            tx.setAttribute('align', 'center');
-            tx.setAttribute('color', '#00FFAA');
-            tx.setAttribute('width', tw(disp.x));
-            tx.setAttribute('position', '0 ' + (-disp.y / 2 - gap) + ' ' + (disp.z / 2));
-            this.holder.appendChild(tx);
-
-            const ty = document.createElement('a-text');
-            ty.setAttribute('value', 'H: ' + fmtLen(real.y));
-            ty.setAttribute('align', 'center');
-            ty.setAttribute('color', '#00FFAA');
-            ty.setAttribute('width', tw(disp.y));
-            ty.setAttribute('rotation', '0 0 90');
-            ty.setAttribute('position', (disp.x / 2 + gap) + ' 0 ' + (disp.z / 2));
-            this.holder.appendChild(ty);
-
-            const tz = document.createElement('a-text');
-            tz.setAttribute('value', 'T: ' + fmtLen(real.z));
-            tz.setAttribute('align', 'center');
-            tz.setAttribute('color', '#00FFAA');
-            tz.setAttribute('width', tw(disp.z));
-            tz.setAttribute('rotation', '-90 0 0');
-            tz.setAttribute('position', '0 ' + (disp.y / 2 + gap) + ' 0');
-            this.holder.appendChild(tz);
-
-            this.holder.setAttribute('visible', this.visible);
-          } catch (err) {
-            console.error('mass-anzeige Fehler:', err);
-          }
-        },
-
-        toggle: function () {
-          this.visible = !this.visible;
-          if (this.holder) this.holder.setAttribute('visible', this.visible);
-          return this.visible;
-        }
-      });
-
-
-      // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 3: HUD-FOLLOW
-      // ════════════════════════════════════════════════════════════════
-      AFRAME.registerComponent('hud-follow', {
-        schema: {
-          distance: { type: 'number', default: 0.8 },
-          offsetY:  { type: 'number', default: -0.22 }
-        },
-
-        init: function () {
-          this.tmpPos  = new THREE.Vector3();
-          this.tmpDir  = new THREE.Vector3();
-          this.tmpQuat = new THREE.Quaternion();
-        },
-
-        tick: function () {
-          try {
-            const cam = this.el.sceneEl.camera;
-            if (!cam) return;
-
-            cam.getWorldPosition(this.tmpPos);
-            cam.getWorldDirection(this.tmpDir);   // Blickrichtung, NICHT negieren
-            cam.getWorldQuaternion(this.tmpQuat);
-
-            this.el.object3D.position.copy(this.tmpPos)
-              .addScaledVector(this.tmpDir, this.data.distance);
-            this.el.object3D.position.y += this.data.offsetY;
-            this.el.object3D.quaternion.copy(this.tmpQuat);
-          } catch (err) { /* nie kritisch */ }
-        }
-      });
-
-
-      // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 4: SCHNITTANSICHT (X / Y / Z, an Objekt-Achsen)
-      // ════════════════════════════════════════════════════════════════
-      AFRAME.registerComponent('clipping-plane', {
-        init: function () {
-          this.plane        = new THREE.Plane();
-          this.clipPosition = 0;
-          this.range        = 0.5;
-          this.axis         = 'y';
-          this.enabled      = false;
-          this.ready        = false;
-
-          this.tmpPos    = new THREE.Vector3();
-          this.tmpQuat   = new THREE.Quaternion();
-          this.tmpNormal = new THREE.Vector3();
-          this.tmpPoint  = new THREE.Vector3();
-
-          const setup = () => {
-            try {
-              const renderer = this.el.sceneEl.renderer;
-              if (!renderer) return;
-              renderer.localClippingEnabled = true;
-              renderer.clippingPlanes = [];
-              this.ready = true;
-            } catch (err) {
-              console.error('clipping Setup-Fehler:', err);
-            }
-          };
-
-          if (this.el.sceneEl.hasLoaded) setup();
-          else this.el.sceneEl.addEventListener('loaded', setup);
-        },
-
-        setRange: function (r) {
-          this.range = r;
-          this.clipPosition = 0;
-        },
-
-        cycleAxis: function () {
-          this.axis = this.axis === 'y' ? 'x' : this.axis === 'x' ? 'z' : 'y';
-          this.clipPosition = 0;
-        },
-
-        toggle: function () {
-          if (!this.ready) return;
-          this.enabled = !this.enabled;
-          try {
-            const renderer = this.el.sceneEl.renderer;
-            renderer.clippingPlanes = this.enabled ? [this.plane] : [];
-          } catch (err) {
-            console.error('clipping Toggle-Fehler:', err);
-          }
-        },
-
-        move: function (deltaFrac) {
-          this.clipPosition += deltaFrac * this.range;
-          this.clipPosition = Math.max(-this.range, Math.min(this.range, this.clipPosition));
-        },
-
-        tick: function () {
-          if (!this.enabled || !this.ready) return;
-          try {
-            const mnEl = document.querySelector('#model-node');
-            if (!mnEl) return;
-            const mn = mnEl.object3D;
-
-            mn.getWorldPosition(this.tmpPos);
-            mn.getWorldQuaternion(this.tmpQuat);
-
-            if      (this.axis === 'y') this.tmpNormal.set(0, -1,  0);
-            else if (this.axis === 'x') this.tmpNormal.set(-1, 0,  0);
-            else                         this.tmpNormal.set(0,  0, -1);
-
-            this.tmpNormal.applyQuaternion(this.tmpQuat).normalize();
-
-            this.tmpPoint.copy(this.tmpPos)
-              .addScaledVector(this.tmpNormal, -this.clipPosition);
-
-            this.plane.setFromNormalAndCoplanarPoint(this.tmpNormal, this.tmpPoint);
-          } catch (err) { /* nie kritisch */ }
-        }
-      });
-
-
-      // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 5: GLB BIBLIOTHEK (GRIP rechts oeffnet)
-      // ════════════════════════════════════════════════════════════════
-      AFRAME.registerComponent('bibliothek-menu', {
-        init: function () {
-          this.visible     = false;
-          this.selectedIdx = 0;
-          this.items       = GLB_BIBLIOTHEK;
-          this.panel       = null;
-          this.itemEls     = [];
-
-          this.tmpPos  = new THREE.Vector3();
-          this.tmpDir  = new THREE.Vector3();
-          this.tmpQuat = new THREE.Quaternion();
-
-          const build = () => {
-            try { this._buildPanel(); }
-            catch (err) { console.error('Bibliothek Aufbau-Fehler:', err); }
-          };
-          if (this.el.sceneEl.hasLoaded) build();
-          else this.el.sceneEl.addEventListener('loaded', build);
-        },
-
-        _label: function (item) {
-          const ms = item.massstab && item.massstab !== 1 ? ' 1:' + item.massstab : ' 1:1';
-          return item.name + ms + (item.boden ? ' (Boden)' : '') + '  [' + item.src + ']';
-        },
-
-        _buildPanel: function () {
-          this.panel = document.createElement('a-entity');
-          this.panel.setAttribute('visible', 'false');
-          this.el.sceneEl.appendChild(this.panel);
-
-          const bg = document.createElement('a-plane');
-          bg.setAttribute('width',  '0.7');
-          bg.setAttribute('height', String(0.08 * this.items.length + 0.14));
-          bg.setAttribute('color',  '#111122');
-          bg.setAttribute('opacity','0.92');
-          this.panel.appendChild(bg);
-
-          const title = document.createElement('a-text');
-          title.setAttribute('value',    '- GLB Bibliothek -');
-          title.setAttribute('align',    'center');
-          title.setAttribute('color',    '#00CCFF');
-          title.setAttribute('width',    '1.3');
-          title.setAttribute('position', '0 ' + (0.04 * this.items.length + 0.03) + ' 0.001');
-          this.panel.appendChild(title);
-
-          this.itemEls = [];
-          for (let i = 0; i < this.items.length; i++) {
-            const txt = document.createElement('a-text');
-            txt.setAttribute('align',  'center');
-            txt.setAttribute('width',  '1.2');
-            txt.setAttribute('position',
-              '0 ' + (0.04 * (this.items.length - 1 - i) - 0.02) + ' 0.001');
-            this.panel.appendChild(txt);
-            this.itemEls.push(txt);
-          }
-
-          const hint = document.createElement('a-text');
-          hint.setAttribute('value',    'Stick: waehlen | Trigger: laden | Grip: schliessen');
-          hint.setAttribute('align',    'center');
-          hint.setAttribute('color',    '#888888');
-          hint.setAttribute('width',    '0.95');
-          hint.setAttribute('position', '0 ' + (-0.04 * this.items.length - 0.02) + ' 0.001');
-          this.panel.appendChild(hint);
-
-          this._highlight();
-        },
-
-        _highlight: function () {
-          for (let i = 0; i < this.itemEls.length; i++) {
-            const isSel = i === this.selectedIdx;
-            this.itemEls[i].setAttribute('color', isSel ? '#FFD700' : '#FFFFFF');
-            this.itemEls[i].setAttribute('value',
-              (isSel ? '> ' : '  ') + this._label(this.items[i]));
-          }
-        },
-
-        show:   function () { if (this.panel) { this.visible = true;  this.panel.setAttribute('visible', 'true');  } },
-        hide:   function () { if (this.panel) { this.visible = false; this.panel.setAttribute('visible', 'false'); } },
-        toggle: function () { this.visible ? this.hide() : this.show(); },
-
-        navigateUp: function () {
-          this.selectedIdx = (this.selectedIdx - 1 + this.items.length) % this.items.length;
-          this._highlight();
-        },
-
-        navigateDown: function () {
-          this.selectedIdx = (this.selectedIdx + 1) % this.items.length;
-          this._highlight();
-        },
-
-        loadSelected: function () {
-          try {
-            const item      = this.items[this.selectedIdx];
-            const modelEl   = document.querySelector('#modell-objekt');
-            const rigEl     = document.querySelector('#rig');
-            const unitScale = UNIT_SCALE[item.unit] || 1.0;
-            const massstab  = item.massstab && item.massstab > 0 ? item.massstab : 1;
-            const viewScale = 1 / massstab;
-            const boden     = !!item.boden;
-
-            setHudText('#ui-size', 'Modell laedt...', '#FFAA00');
-
-            rigEl.object3D.quaternion.set(0, 0, 0, 1);
-            document.querySelector('#model-node').object3D.rotation.set(0, 0, 0);
-            if (boden) {
-              const cam = this.el.sceneEl.camera;
-              if (cam) {
-                cam.getWorldPosition(this.tmpPos);
-                cam.getWorldDirection(this.tmpDir);
-                this.tmpDir.y = 0; this.tmpDir.normalize();
-                rigEl.object3D.position.copy(this.tmpPos).addScaledVector(this.tmpDir, 1.5);
-                rigEl.object3D.position.y = 0;
-              } else {
-                rigEl.object3D.position.set(0, 0, -1.5);
-              }
-            } else {
-              rigEl.object3D.position.set(0, 1.2, -0.6);
-            }
-
-            // Basis-Position merken (fuer "zurueck auf Boden" und Hoehen-Anzeige)
-            window.AR_MODEL.basePos.copy(rigEl.object3D.position);
-            setHudText('#ui-hoehe', 'Hoehe: 0.00 m', '#BBBBBB');
-
-            modelEl.setAttribute('auto-center',
-              'unitScale: ' + unitScale + '; viewScale: ' + viewScale + '; boden: ' + boden);
-            modelEl.setAttribute('gltf-model', item.src);
-
-            setHudText('#ui-modell-name', item.name + '  (' + item.src + ')');
-            setHudText('#ui-scale-info',
-              'Massstab 1:' + massstab + '  |  Einheit: ' + item.unit
-              + (boden ? '  |  auf Boden' : ''));
-          } catch (err) {
-            console.error('Bibliothek Lade-Fehler:', err);
-          }
-          this.hide();
-        },
-
-        tick: function () {
-          if (!this.visible || !this.panel) return;
-          try {
-            const cam = this.el.sceneEl.camera;
-            if (!cam) return;
-
-            cam.getWorldPosition(this.tmpPos);
-            cam.getWorldDirection(this.tmpDir);
-            cam.getWorldQuaternion(this.tmpQuat);
-
-            this.panel.object3D.position.copy(this.tmpPos)
-              .addScaledVector(this.tmpDir, 0.7);
-            this.panel.object3D.quaternion.copy(this.tmpQuat);
-          } catch (err) { /* nie kritisch */ }
-        }
-      });
-
-
-      // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 6: FLUG-STEUERUNG (LINKER Controller)
-      //
-      // In AR kann man nicht physisch in den 2. Stock. Der Trick:
-      // Das MODELL wird verschoben -> fuehlt sich an wie Fliegen.
-      //
-      // Linker Stick     = vor/zurueck/links/rechts (in Blickrichtung)
-      // X-Taste halten   = aufsteigen (Modell sinkt)
-      // Y-Taste halten   = absinken   (Modell steigt)
-      // Linker Grip      = zurueck auf Boden-Niveau / Startposition
-      //
-      // Geschwindigkeit passt sich der Modellgroesse an.
-      // ════════════════════════════════════════════════════════════════
-      AFRAME.registerComponent('flug-steuerung', {
-        init: function () {
-          this.rig     = document.querySelector('#rig').object3D;
-          this.stickX  = 0;
-          this.stickY  = 0;
-          this.upHeld  = false;
-          this.downHeld = false;
-          this.deadzone = 0.2;
-
-          this.tmpFwd   = new THREE.Vector3();
-          this.tmpRight = new THREE.Vector3();
-          this.tmpUp    = new THREE.Vector3(0, 1, 0);
-          this.tmpMove  = new THREE.Vector3();
-
-          this.el.addEventListener('thumbstickmoved', (evt) => {
-            this.stickX = evt.detail.x || 0;
-            this.stickY = evt.detail.y || 0;
-          });
-
-          this.el.addEventListener('xbuttondown', () => { this.upHeld = true;  });
-          this.el.addEventListener('xbuttonup',   () => { this.upHeld = false; });
-          this.el.addEventListener('ybuttondown', () => { this.downHeld = true;  });
-          this.el.addEventListener('ybuttonup',   () => { this.downHeld = false; });
-
-          // Grip links: zurueck zur Basis-Position (Boden-Niveau)
-          this.el.addEventListener('gripdown', () => {
-            this.rig.position.copy(window.AR_MODEL.basePos);
-            this._updateHud();
-          });
-        },
-
-        // Geschwindigkeit pro Frame, abhaengig von Modellgroesse
-        _speed: function () {
-          const d = window.AR_MODEL.maxDim || 0.5;
-          return Math.min(0.04, Math.max(0.003, d * 0.001));
-        },
-
-        _updateHud: function () {
-          // Virtuelle Hoehe = wie weit das Modell unter seine Basis geschoben wurde
-          const h = window.AR_MODEL.basePos.y - this.rig.position.y;
-          const col = Math.abs(h) < 0.005 ? '#BBBBBB' : '#FF88FF';
-          setHudText('#ui-hoehe', 'Hoehe: ' + (h >= 0 ? '+' : '') + h.toFixed(2) + ' m', col);
-        },
-
-        tick: function () {
-          try {
-            const moveX = Math.abs(this.stickX) > this.deadzone ? this.stickX : 0;
-            const moveY = Math.abs(this.stickY) > this.deadzone ? this.stickY : 0;
-            const vert  = (this.upHeld ? 1 : 0) - (this.downHeld ? 1 : 0);
-
-            if (moveX === 0 && moveY === 0 && vert === 0) return;
-
-            const cam = this.el.sceneEl.camera;
-            if (!cam) return;
-
-            const sp = this._speed();
-
-            // Blickrichtung horizontal
-            cam.getWorldDirection(this.tmpFwd);
-            this.tmpFwd.y = 0;
-            if (this.tmpFwd.lengthSq() < 0.0001) this.tmpFwd.set(0, 0, -1);
-            this.tmpFwd.normalize();
-            this.tmpRight.crossVectors(this.tmpFwd, this.tmpUp).normalize();
-
-            // "Ich fliege vorwaerts" = Modell kommt auf mich zu (Gegenrichtung).
-            // Stick nach oben liefert y < 0  ->  Modell entlang -Blickrichtung
-            this.tmpMove.set(0, 0, 0);
-            this.tmpMove.addScaledVector(this.tmpFwd,    moveY * sp);
-            this.tmpMove.addScaledVector(this.tmpRight, -moveX * sp);
-            this.tmpMove.y = -vert * sp;   // aufsteigen = Modell nach unten
-
-            this.rig.position.add(this.tmpMove);
-            this._updateHud();
-          } catch (err) { /* nie kritisch */ }
-        }
-      });
-
-
-      // ════════════════════════════════════════════════════════════════
-      // KOMPONENTE 7: AR-STEUERUNG (RECHTER Controller)
-      //
-      // Trigger (auf Box zeigen) = Greifen: bewegen 1:1, drehen um sich selbst
-      // Grip                     = Bibliothek
-      // Stick X                  = Modell drehen
-      // Stick Y                  = Zoom / Schnittebene / Bibliothek
-      // A                        = Schnitt EIN/AUS
-      // B                        = Schnitt-Achse (Y -> X -> Z)
-      // Stick DRUECKEN           = Mass-Anzeige EIN/AUS
-      // ════════════════════════════════════════════════════════════════
-      AFRAME.registerComponent('ar-steuerung', {
-        init: function () {
-          this.controller = this.el;
-          this.rig        = document.querySelector('#rig').object3D;
-          this.modelNode  = document.querySelector('#model-node').object3D;
-
-          this.isGrabbed = false;
-          this.stickX    = 0;
-          this.stickY    = 0;
-          this.stickCool = 0;
-
-          this.deadzone    = 0.2;
-          this.rotateStep  = 0.05;
-          this.zoomStep    = 0.03;
-          this.minDistance = 0.2;
-          this.maxDistance = 30.0;
-
-          this.grabCtrlStartPos  = new THREE.Vector3();
-          this.grabCtrlStartQuat = new THREE.Quaternion();
-          this.grabRigStartPos   = new THREE.Vector3();
-          this.grabRigStartQuat  = new THREE.Quaternion();
-
-          this.tmpCtrlPos  = new THREE.Vector3();
-          this.tmpCtrlQuat = new THREE.Quaternion();
-          this.tmpDelta    = new THREE.Vector3();
-          this.tmpDeltaQ   = new THREE.Quaternion();
-          this.tmpInvQ     = new THREE.Quaternion();
-          this.tmpCamPos   = new THREE.Vector3();
-          this.tmpRigPos   = new THREE.Vector3();
-          this.tmpDir      = new THREE.Vector3();
-          this.tmpForward  = new THREE.Vector3();
-
-          const getMenu = () => {
-            const comps = this.el.components;
-            return comps ? comps['bibliothek-menu'] : null;
-          };
-          const getClip = () => {
-            const el = document.querySelector('#clip-controller');
-            return el && el.components ? el.components['clipping-plane'] : null;
-          };
-          const getMass = () => {
-            const el = document.querySelector('#model-node');
-            return el && el.components ? el.components['mass-anzeige'] : null;
-          };
-          this._getMenu = getMenu;
-          this._getClip = getClip;
-
-          this.controller.addEventListener('triggerdown', () => {
-            const menu = getMenu();
-            if (menu && menu.visible) {
-              menu.loadSelected();
-              return;
-            }
-            const raycaster = this.controller.components.raycaster;
-            const hits = raycaster ? raycaster.intersections : [];
-            if (!hits || hits.length === 0) return;
-            for (let i = 0; i < hits.length; i++) {
-              if (hits[i].object && hits[i].object.el &&
-                  hits[i].object.el.classList.contains('grabbable')) {
-                this.controller.object3D.getWorldPosition(this.grabCtrlStartPos);
-                this.controller.object3D.getWorldQuaternion(this.grabCtrlStartQuat);
-                this.grabRigStartPos.copy(this.rig.position);
-                this.grabRigStartQuat.copy(this.rig.quaternion);
-                this.isGrabbed = true;
-                break;
-              }
-            }
-          });
-          this.controller.addEventListener('triggerup', () => {
-            this.isGrabbed = false;
-          });
-
-          this.controller.addEventListener('gripdown', () => {
-            const m = getMenu();
-            if (m) m.toggle();
-          });
-
-          this.controller.addEventListener('thumbstickdown', () => {
-            const mass = getMass();
-            if (mass) {
-              const on = mass.toggle();
-              setHudText('#ui-masse', on ? 'Masse: AN' : 'Masse: AUS',
-                on ? '#00FFAA' : '#BBBBBB');
-            }
-          });
-
-          this.controller.addEventListener('thumbstickmoved', (evt) => {
-            this.stickX = evt.detail.x || 0;
-            this.stickY = evt.detail.y || 0;
-          });
-
-          this.controller.addEventListener('abuttondown', () => {
-            const c = getClip();
-            if (c) {
-              c.toggle();
-              setHudText('#ui-schnitt', c.enabled ? 'Schnitt: AN' : 'Schnitt: AUS',
-                c.enabled ? '#00CCFF' : '#BBBBBB');
-            }
-          });
-
-          this.controller.addEventListener('bbuttondown', () => {
-            const c = getClip();
-            if (c) {
-              c.cycleAxis();
-              setHudText('#ui-axis', 'Achse: ' + c.axis.toUpperCase());
-            }
-          });
-        },
-
-        tick: function () {
-          if (!this.cameraObj) {
-            const camEl = document.querySelector('a-camera');
-            if (camEl && camEl.object3D) {
-              this.cameraObj = camEl.object3D;
-            } else {
-              return;
-            }
-          }
-
-          const menu = this._getMenu ? this._getMenu() : null;
-          const clip = this._getClip ? this._getClip() : null;
-
-          if (menu && menu.visible) {
-            if (this.stickCool <= 0 && Math.abs(this.stickY) > this.deadzone) {
-              if (this.stickY > this.deadzone) menu.navigateDown();
-              else                              menu.navigateUp();
-              this.stickCool = 18;
-            }
-            if (this.stickCool > 0) this.stickCool--;
-            return;
-          }
-
-          if (this.isGrabbed) {
-            this.controller.object3D.getWorldPosition(this.tmpCtrlPos);
-            this.controller.object3D.getWorldQuaternion(this.tmpCtrlQuat);
-
-            this.tmpDelta.copy(this.tmpCtrlPos).sub(this.grabCtrlStartPos);
-            this.rig.position.copy(this.grabRigStartPos).add(this.tmpDelta);
-
-            this.tmpInvQ.copy(this.grabCtrlStartQuat).invert();
-            this.tmpDeltaQ.copy(this.tmpCtrlQuat).multiply(this.tmpInvQ);
-            this.rig.quaternion.copy(this.tmpDeltaQ).multiply(this.grabRigStartQuat);
-            return;
-          }
-
-          if (Math.abs(this.stickX) > this.deadzone) {
-            this.modelNode.rotation.y += (this.stickX > 0 ? this.rotateStep : -this.rotateStep);
-          }
-
-          if (Math.abs(this.stickY) > this.deadzone) {
-            if (clip && clip.enabled) {
-              clip.move(this.stickY * -0.012);
-            } else {
-              this.cameraObj.getWorldPosition(this.tmpCamPos);
-              this.rig.getWorldPosition(this.tmpRigPos);
-
-              this.tmpDir.subVectors(this.tmpRigPos, this.tmpCamPos);
-              let dist = this.tmpDir.length();
-
-              if (dist < 0.0001) {
-                this.cameraObj.getWorldDirection(this.tmpForward);
-                this.tmpDir.copy(this.tmpForward);
-                dist = 0.5;
-              } else {
-                this.tmpDir.normalize();
-              }
-
-              if (this.stickY > this.deadzone) {
-                dist -= this.zoomStep;
-              } else if (this.stickY < -this.deadzone) {
-                dist += this.zoomStep;
-              }
-
-              dist = Math.max(this.minDistance, Math.min(this.maxDistance, dist));
-
-              this.tmpRigPos.copy(this.tmpCamPos).add(this.tmpDir.multiplyScalar(dist));
-              this.rig.position.copy(this.tmpRigPos);
-            }
-          }
-        }
-      });
-    </script>
-  </head>
-
-  <body>
-    <a-scene
-      xr-mode-ui="XRMode: ar"
-      webxr="optionalFeatures: hand-tracking;"
-      renderer="colorManagement: true; antialias: true; physicallyCorrectLights: true; exposure: 1.2;">
-
-      <a-assets>
-        <a-asset-item id="meinModell" src="EntwurfARBrille.glb"></a-asset-item>
-      </a-assets>
-
-      <a-camera position="0 1.6 0"></a-camera>
-
-      <a-light type="ambient" color="#FFF" intensity="0.6"></a-light>
-      <a-light type="directional" color="#FFF" intensity="1.5" position="-1 2 1" castShadow="true"></a-light>
-      <a-light type="directional" color="#FFDDBB" intensity="0.5" position="1 -1 -1"></a-light>
-
-      <!-- HUD -->
-      <a-entity id="hud" hud-follow="distance: 0.8; offsetY: -0.22">
-        <a-plane width="0.6" height="0.32" color="#111122" opacity="0.75"></a-plane>
-        <a-text id="ui-modell-name" value="AR Brille  (EntwurfARBrille.glb)"
-                align="center" color="#FFD700" width="1.1" position="0 0.12 0.001"></a-text>
-        <a-text id="ui-scale-info" value="Massstab 1:1  |  Einheit: m"
-                align="center" color="#00CCFF" width="0.9" position="0 0.08 0.001"></a-text>
-        <a-text id="ui-size" value="Modell laedt..."
-                align="center" color="#FFAA00" width="0.85" position="0 0.04 0.001"></a-text>
-        <a-text id="ui-hoehe" value="Hoehe: 0.00 m"
-                align="center" color="#BBBBBB" width="0.8" position="0 0.00 0.001"></a-text>
-        <a-text id="ui-schnitt" value="Schnitt: AUS"
-                align="center" color="#BBBBBB" width="0.8" position="0 -0.04 0.001"></a-text>
-        <a-text id="ui-axis" value="Achse: Y"
-                align="center" color="#BBBBBB" width="0.7" position="0 -0.07 0.001"></a-text>
-        <a-text id="ui-masse" value="Masse: AUS"
-                align="center" color="#BBBBBB" width="0.7" position="0 -0.10 0.001"></a-text>
-        <a-text value="R: Grip Bibliothek | A Schnitt | B Achse | Stick-Druck Masse"
-                align="center" color="#777777" width="0.85" position="0 -0.13 0.001"></a-text>
-        <a-text value="L: Stick Fliegen | X hoch | Y runter | Grip Boden"
-                align="center" color="#777777" width="0.85" position="0 -0.155 0.001"></a-text>
-      </a-entity>
-
-      <!-- RIG: Grab-Box + Modell -->
-      <a-entity id="rig" position="0 1.2 -0.6">
-        <a-box
-          class="grabbable"
-          position="0 0 0"
-          depth="0.5"
-          height="0.5"
-          width="0.5"
-          material="color: green; opacity: 0.2; transparent: true">
-        </a-box>
-
-        <a-entity id="model-node" mass-anzeige>
-          <a-entity
-            id="modell-objekt"
-            gltf-model="#meinModell"
-            scale="1 1 1"
-            position="0 0 0"
-            auto-center="unitScale: 1.0; viewScale: 1.0; boden: false">
-          </a-entity>
-        </a-entity>
-      </a-entity>
-
-      <!-- Clipping Plane -->
-      <a-entity id="clip-controller" clipping-plane></a-entity>
-
-      <!-- RECHTER CONTROLLER: Greifen, Bibliothek, Schnitt, Masse -->
-      <a-entity id="controller-right"
-                oculus-touch-controls="hand: right"
-                raycaster="objects: .grabbable; showLine: true; far: 100"
-                line="color: yellow; opacity: 1"
-                bibliothek-menu
-                ar-steuerung>
-      </a-entity>
-
-      <!-- LINKER CONTROLLER: Fliegen / Hoehe -->
-      <a-entity id="controller-left"
-                oculus-touch-controls="hand: left"
-                flug-steuerung>
-      </a-entity>
-
-      <!-- Freie Hand (nur Darstellung) -->
-      <a-entity id="hand-right"
-                hand-tracking-controls="hand: right; modelStyle: dots">
-      </a-entity>
-
-    </a-scene>
-  </body>
+      } else if (Math.abs(this.turn) < 0.3) this.turnArmed = true;
+    }
+  });
+
+  /* ---------- DOM der Szene ---------- */
+  const scene = document.createElement('a-scene');
+  scene.setAttribute('hall', '');
+  scene.setAttribute('renderer',
+    'colorManagement: true; antialias: true; highRefreshRate: true');
+  scene.setAttribute('shadow', 'type: pcf');
+  scene.setAttribute('light', 'defaultLightsEnabled: false');
+  scene.setAttribute('device-orientation-permission-ui', 'enabled: false');
+  scene.innerHTML = `
+    <a-entity id="rig" position="${VIEWS.start.p.join(' ')}"
+              rotation="0 ${VIEWS.start.r} 0" locomotion>
+      <a-entity id="cam" camera="fov: 62; near: 0.05; far: 600"
+                position="0 1.65 0" look-controls="pointerLockEnabled: false"
+                wasd-controls="acceleration: 42; fly: false"></a-entity>
+      <a-entity id="hand-l" oculus-touch-controls="hand: left"></a-entity>
+      <a-entity id="hand-r" oculus-touch-controls="hand: right"></a-entity>
+    </a-entity>
+    <a-entity id="tpmark" visible="false"
+              geometry="primitive: torus; radius: 0.42; radiusTubular: 0.045; segmentsTubular: 32"
+              rotation="-90 0 0"
+              material="shader: flat; color: #ff8c1a; opacity: 0.9; transparent: true"></a-entity>
+    <a-entity id="model" model-setup gltf-model="url(${modelURL})"></a-entity>`;
+  document.body.appendChild(scene);
+
+  /* ---------- Bedienung ---------- */
+  const ui = document.getElementById('ui'), hud = document.getElementById('hud');
+
+  scene.addEventListener('model-ready', e => {
+    document.getElementById('boot').classList.add('hide');
+    setTimeout(() => document.getElementById('boot').remove(), 600);
+    ui.hidden = false; hud.hidden = false;
+    hud.textContent = e.detail.tris.toLocaleString('de-CH') + ' Dreiecke';
+    let n = 0, t0 = performance.now();
+    setInterval(() => {
+      const now = performance.now();
+      hud.textContent = Math.round(n * 1000 / (now - t0)) + ' fps · ' +
+        e.detail.tris.toLocaleString('de-CH') + ' Dreiecke';
+      n = 0; t0 = now;
+    }, 1000);
+    const tickEl = document.createElement('a-entity');
+    if (!AFRAME.components.fps) AFRAME.registerComponent('fps', { tick() { n++; } });
+    tickEl.setAttribute('fps', '');
+    scene.appendChild(tickEl);
+  });
+
+  window.toggleLayer = function (name, force) {
+    const hall = scene.components.hall;
+    const box = document.querySelector(`[data-layer="${name}"]`);
+    const on = force !== undefined ? force : !box.checked;
+    box.checked = on;
+    (hall.layers[name] || []).forEach(o => o.visible = on);
+    hall.refresh();
+  };
+  document.querySelectorAll('[data-layer]').forEach(b =>
+    b.addEventListener('change', () => window.toggleLayer(b.dataset.layer, b.checked)));
+
+  let doll = false;
+  window.setView = function (key) {
+    const rig = document.getElementById('rig'), model = document.getElementById('model');
+    const hall = scene.components.hall;
+    if (key === 'doll') {
+      doll = !doll;
+      const s = doll ? 0.05 : 1;
+      const lc0 = document.getElementById('cam').components['look-controls'];
+      if (lc0 && doll) lc0.pitchObject.rotation.x = -18 * Math.PI / 180;
+      const cam = document.getElementById('cam').object3D.getWorldPosition(new THREE.Vector3());
+      const yaw = new THREE.Euler().setFromQuaternion(
+        document.getElementById('cam').object3D.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y;
+      model.object3D.scale.setScalar(s);
+      if (doll) {
+        const tgt = new THREE.Vector3(cam.x - Math.sin(yaw) * 2.6, cam.y - 0.95, cam.z - Math.cos(yaw) * 2.6);
+        model.object3D.position.set(tgt.x - CENTER.x * s, tgt.y - (FLOOR + 5) * s, tgt.z - CENTER.z * s);
+      } else model.object3D.position.set(0, 0, 0);
+      hall.refresh();
+      return;
+    }
+    if (doll) window.setView('doll');
+    const v = VIEWS[key];
+    rig.object3D.position.set(v.p[0], v.p[1], v.p[2]);
+    rig.object3D.rotation.set(0, v.r * Math.PI / 180, 0);
+    const lc = document.getElementById('cam').components['look-controls'];
+    if (lc) { lc.yawObject.rotation.y = 0; lc.pitchObject.rotation.x = (v.pitch || 0) * Math.PI / 180; }
+    if (key === 'bird') { document.getElementById('fly').checked = true; applyFly(); }
+  };
+  document.querySelectorAll('[data-view]').forEach(b =>
+    b.addEventListener('click', () => window.setView(b.dataset.view)));
+
+  const az = document.getElementById('az'), el = document.getElementById('el');
+  function applySun() {
+    document.getElementById('vaz').textContent = az.value + '°';
+    document.getElementById('vel').textContent = el.value + '°';
+    scene.components.hall.setSun(+az.value, +el.value);
+  }
+  let sunTimer;
+  [az, el].forEach(s => s.addEventListener('input', () => {
+    clearTimeout(sunTimer); sunTimer = setTimeout(applySun, 90);
+  }));
+  window.cycleSun = function () {
+    az.value = (+az.value + 45) % 360;
+    el.value = 20 + ((+el.value + 20 - 20) % 60);
+    applySun();
+  };
+
+  const ex = document.getElementById('ex');
+  ex.addEventListener('input', () => {
+    const v = ex.value / 100;
+    document.getElementById('vex').textContent = v.toFixed(2);
+    scene.renderer.toneMappingExposure = v;
+  });
+  document.getElementById('sh').addEventListener('change', e =>
+    scene.components.hall.setShadows(e.target.checked));
+
+  function applyFly() {
+    document.getElementById('cam').setAttribute('wasd-controls',
+      'acceleration: 42; fly: ' + document.getElementById('fly').checked);
+  }
+  document.getElementById('fly').addEventListener('change', applyFly);
+  document.getElementById('minb').addEventListener('click', e => {
+    ui.classList.toggle('min');
+    e.target.textContent = ui.classList.contains('min') ? '+' : '–';
+  });
+}
+</script>
+</body>
 </html>
