@@ -6,7 +6,7 @@
 <title>Neubau VR – Popp Metallbau</title>
 <style>
   :root{
-    --bg:#10131a; --panel:rgba(18,22,30,.86); --line:rgba(255,255,255,.12);
+    --bg:#10131a; --panel:rgba(18,22,30,.88); --line:rgba(255,255,255,.12);
     --fg:#e8ecf2; --dim:#96a0b0; --acc:#ff8c1a;
   }
   *{box-sizing:border-box}
@@ -14,31 +14,28 @@
     font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
   a-scene{position:fixed;inset:0}
 
-  /* ---------- Ladebildschirm ---------- */
-  #boot{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;
+  #boot{position:fixed;inset:0;z-index:60;display:flex;flex-direction:column;
     align-items:center;justify-content:center;gap:18px;background:var(--bg);
     transition:opacity .5s;text-align:center;padding:24px}
-  #boot h1{margin:0;font-size:20px;font-weight:600;letter-spacing:.2px}
-  #boot p{margin:0;color:var(--dim);font-size:13px;max-width:34ch}
+  #boot h1{margin:0;font-size:20px;font-weight:600}
+  #boot p{margin:0;color:var(--dim);font-size:13px;max-width:36ch}
   #bar{width:min(300px,70vw);height:4px;border-radius:4px;background:rgba(255,255,255,.12);overflow:hidden}
   #bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
   #boot.hide{opacity:0;pointer-events:none}
-  #pick{margin-top:6px}
   button,select{font:inherit;color:var(--fg);background:rgba(255,255,255,.08);
-    border:1px solid var(--line);border-radius:8px;padding:7px 12px;cursor:pointer}
-  button:hover{background:rgba(255,255,255,.14)}
+    border:1px solid var(--line);border-radius:8px;padding:6px 11px;cursor:pointer}
+  button:hover{background:rgba(255,255,255,.15)}
 
-  /* ---------- Bedienpanel ---------- */
-  #ui{position:fixed;top:12px;left:12px;z-index:40;width:250px;max-height:calc(100vh - 24px);
+  #ui{position:fixed;top:12px;left:12px;z-index:40;width:252px;max-height:calc(100vh - 24px);
     overflow:auto;background:var(--panel);backdrop-filter:blur(14px);
     border:1px solid var(--line);border-radius:14px;padding:12px 13px;
     box-shadow:0 12px 40px rgba(0,0,0,.45)}
   #ui.min{width:auto;padding:8px 10px}
   #ui.min .body{display:none}
   .hd{display:flex;align-items:center;justify-content:space-between;gap:10px}
-  .hd b{font-size:13px;font-weight:600}
-  .hd button{padding:2px 8px;line-height:1.4}
-  h3{margin:14px 0 6px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);font-weight:600}
+  .hd b{font-size:13px}
+  .hd button{padding:1px 9px}
+  h3{margin:13px 0 5px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--dim);font-weight:600}
   label.row{display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer;font-size:13px}
   label.row input{accent-color:var(--acc);width:15px;height:15px}
   .sw{width:10px;height:10px;border-radius:3px;flex:none}
@@ -46,9 +43,10 @@
   .sl input{grid-column:1/3;width:100%;accent-color:var(--acc)}
   .btns{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:4px}
   .btns button{padding:6px 4px;font-size:12px}
-  .note{color:var(--dim);font-size:11.5px;line-height:1.5;margin-top:10px;
+  select{width:100%;margin-top:2px}
+  .note{color:var(--dim);font-size:11.5px;line-height:1.55;margin-top:10px;
     border-top:1px solid var(--line);padding-top:9px}
-  .note b{color:var(--fg);font-weight:600}
+  .note b{color:var(--fg)}
   kbd{font:11px ui-monospace,monospace;background:rgba(255,255,255,.1);
     border:1px solid var(--line);border-radius:4px;padding:0 4px}
   #hud{position:fixed;right:12px;bottom:12px;z-index:40;color:var(--dim);font:11px ui-monospace,monospace;
@@ -69,36 +67,48 @@
 </div>
 
 <div id="ui" hidden>
-  <div class="hd"><b>Neubau · Halle</b><button id="minb" title="Panel ein-/ausklappen">–</button></div>
+  <div class="hd"><b>Neubau · Halle</b><button id="minb">–</button></div>
   <div class="body">
-
     <h3>Ebenen</h3>
     <label class="row"><input type="checkbox" data-layer="gebaeude" checked><span class="sw" style="background:#c9c6c0"></span>Gebäude &amp; Boden</label>
+    <label class="row"><input type="checkbox" data-layer="dach" checked><span class="sw" style="background:#ffe9b0"></span>Dach &amp; Beleuchtung</label>
     <label class="row"><input type="checkbox" data-layer="stahlbau" checked><span class="sw" style="background:#6d7378"></span>Stahlbau &amp; Treppe</label>
     <label class="row"><input type="checkbox" data-layer="maschinen" checked><span class="sw" style="background:#a03428"></span>Maschinen &amp; Kran</label>
     <label class="row"><input type="checkbox" data-layer="personen" checked><span class="sw" style="background:#3d4c5e"></span>Personen (1.85 m)</label>
     <label class="row"><input type="checkbox" data-layer="planung" checked><span class="sw" style="background:#ff8c1a"></span>Planungsflächen</label>
 
     <h3>Licht</h3>
-    <div class="sl"><span>Sonnenrichtung</span><span id="vaz">135°</span><input type="range" id="az" min="0" max="360" value="135"></div>
+    <select id="mode">
+      <option value="tag">Tageslicht</option>
+      <option value="abend">Abend / Dämmerung</option>
+      <option value="kunst">Kunstlicht (Halle)</option>
+    </select>
+    <div class="sl" style="margin-top:9px"><span>Sonnenrichtung</span><span id="vaz">135°</span><input type="range" id="az" min="0" max="360" value="135"></div>
     <div class="sl"><span>Sonnenhöhe</span><span id="vel">42°</span><input type="range" id="el" min="8" max="85" value="42"></div>
-    <div class="sl"><span>Belichtung</span><span id="vex">1.00</span><input type="range" id="ex" min="40" max="200" value="100"></div>
+    <div class="sl"><span>Belichtung</span><span id="vex">1.00</span><input type="range" id="ex" min="40" max="220" value="100"></div>
     <label class="row"><input type="checkbox" id="sh" checked>Schlagschatten</label>
 
-    <h3>Ansicht</h3>
+    <h3>Standort &amp; Höhe</h3>
     <div class="btns">
       <button data-view="start">Halle innen</button>
-      <button data-view="bird">Vogelperspektive</button>
       <button data-view="saw">Halle längs</button>
+      <button data-view="bird">Vogelperspektive</button>
       <button data-view="doll">Puppenhaus 1:20</button>
+      <button data-h="2">Höhe +2 m</button>
+      <button data-h="-2">Höhe −2 m</button>
+      <button data-h="0">auf Bodenhöhe</button>
+      <button data-h="9.32">auf Galerie</button>
     </div>
-    <label class="row" style="margin-top:6px"><input type="checkbox" id="fly">Freiflug (Desktop)</label>
 
     <div class="note">
-      <b>Desktop:</b> <kbd>W A S D</kbd> gehen, Maus ziehen = umsehen.<br>
-      <b>VR (Quest):</b> linker Stick gehen, rechter Stick 30°-Drehung,
-      rechter Trigger = Teleport, <kbd>A</kbd> Planungsflächen,
-      <kbd>B</kbd> Puppenhaus, <kbd>X</kbd> Startposition, <kbd>Y</kbd> Sonne.
+      <b>Desktop:</b> <kbd>W A S D</kbd> gehen, <kbd>R</kbd>/<kbd>F</kbd> hoch/runter,
+      Maus ziehen = umsehen.<br>
+      <b>VR:</b> linker Stick gehen, linker Trigger = Teleport (auch auf Galerie,
+      Tisch oder Podest), rechter Stick links/rechts = drehen,
+      <b>rechter Stick vor/zurück = steigen/sinken</b>.
+      Menü hängt am linken Controller, mit dem rechten Laser bedienen.
+      <kbd>X</kbd> Menü, <kbd>Y</kbd> Lichtstimmung, <kbd>A</kbd> Planungsflächen,
+      <kbd>B</kbd> Puppenhaus.
     </div>
   </div>
 </div>
@@ -106,11 +116,11 @@
 <div id="hud" hidden></div>
 
 <script>
-/* ------------------------------------------------------------------ *
- *  A-Frame laden: lokal (offline) → sonst CDN-Kette
- * ------------------------------------------------------------------ */
+/* ================================================================== *
+ *  A-Frame laden – lokale Datei zuerst (offline), sonst CDN-Kette
+ * ================================================================== */
 const AFRAME_URLS = [
-  './aframe.min.js',                                                  // lokal, falls danebengelegt (offline)
+  './aframe.min.js',
   'https://cdn.jsdelivr.net/npm/aframe@1.8.0/dist/aframe-v1.8.0.min.js',
   'https://unpkg.com/aframe@1.8.0/dist/aframe-v1.8.0.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/aframe/1.8.0/aframe.min.js',
@@ -118,7 +128,7 @@ const AFRAME_URLS = [
 ];
 function loadSeq(list, i = 0) {
   return new Promise((res, rej) => {
-    if (i >= list.length) return rej(new Error('A-Frame konnte nicht geladen werden'));
+    if (i >= list.length) return rej(new Error('A-Frame nicht ladbar'));
     const s = document.createElement('script');
     s.src = list[i];
     s.onload = () => res();
@@ -127,13 +137,11 @@ function loadSeq(list, i = 0) {
   });
 }
 
-/* Modellquelle: ?model=… oder Datei daneben */
 const PARAMS = new URLSearchParams(location.search);
 const MODEL_URL = PARAMS.get('model') || 'neubau_pbr.glb';
 
-/* Geometrie der Halle (Weltkoordinaten aus TopSolid, Meter) */
-const FLOOR = 3.57;                 // Oberkante Bodenplatte
-const GALLERY = 9.32;               // Oberkante Galerie
+/* Hallengeometrie (TopSolid-Weltkoordinaten, Meter) */
+const FLOOR = 3.57, GALLERY = 9.32, ROOF = 13.57;
 const CENTER = { x: 17.75, z: 8.5 };
 const VIEWS = {
   start: { p: [8.5, FLOOR, 4.5], r: -78, pitch: 0 },
@@ -143,8 +151,9 @@ const VIEWS = {
 
 const bar = document.querySelector('#bar i');
 const bootmsg = document.getElementById('bootmsg');
+const uiEl = document.getElementById('ui');
+const hudEl = document.getElementById('hud');
 
-/* Modell vorab laden, damit es einen Fortschritt gibt */
 function fetchModel(url) {
   return new Promise((res, rej) => {
     const x = new XMLHttpRequest();
@@ -159,8 +168,8 @@ function fetchModel(url) {
 let modelBlob = null;
 Promise.all([
   loadSeq(AFRAME_URLS),
-  fetchModel(MODEL_URL).then(u => modelBlob = u).catch(err => {
-    bootmsg.innerHTML = 'Modell <code>' + MODEL_URL + '</code> nicht gefunden.<br>Bitte GLB manuell wählen.';
+  fetchModel(MODEL_URL).then(u => modelBlob = u).catch(() => {
+    bootmsg.innerHTML = 'Modell <code>' + MODEL_URL + '</code> nicht gefunden.<br>Bitte GLB von Hand wählen.';
     document.getElementById('pick').hidden = false;
   })
 ]).then(() => { if (modelBlob) start(modelBlob); });
@@ -170,41 +179,47 @@ document.getElementById('file').addEventListener('change', e => {
   if (f) { document.getElementById('pick').hidden = true; start(URL.createObjectURL(f)); }
 });
 
-/* ------------------------------------------------------------------ *
+/* ================================================================== *
  *  Szene
- * ------------------------------------------------------------------ */
+ * ================================================================== */
 function start(modelURL) {
   bootmsg.textContent = 'Szene wird aufgebaut …';
   bar.style.width = '100%';
 
-  /* ---------- prozedurale HDR-Umgebung (Himmel + Sonne) ---------- */
-  function envTexture(sunDir, W = 256, H = 128) {
+  /* gemeinsamer Zustand für Desktop-Panel und VR-Menü */
+  const LAYERS = ['gebaeude', 'dach', 'stahlbau', 'maschinen', 'personen', 'planung'];
+  const state = { layers: {}, mode: 'tag', doll: false, shadows: true };
+  LAYERS.forEach(l => state.layers[l] = true);
+
+  const MODES = {
+    tag:   { sun: 1.00, env: 0.70, pt: 0,  em: 0.10, sky: 1.00, label: 'Tageslicht' },
+    abend: { sun: 0.34, env: 0.26, pt: 34, em: 1.00, sky: 0.42, label: 'Abend' },
+    kunst: { sun: 0.05, env: 0.09, pt: 62, em: 1.30, sky: 0.10, label: 'Kunstlicht' }
+  };
+
+  /* ---------------- prozedurale HDR-Umgebung ---------------- */
+  function envTexture(sunDir, f, W = 256, H = 128) {
     const data = new Float32Array(W * H * 4);
     const mix = (a, b, t) => a + (b - a) * t;
     for (let y = 0; y < H; y++) {
-      const v = (y + 0.5) / H;                      // 0 = unten
-      const elev = (v - 0.5) * Math.PI;             // -90° … +90°
+      const v = (y + 0.5) / H, elev = (v - 0.5) * Math.PI;
       const cy = Math.sin(elev), ce = Math.cos(elev);
       for (let x = 0; x < W; x++) {
-        const u = (x + 0.5) / W;
-        const phi = (u - 0.5) * 2 * Math.PI;        // three: u = atan2(-z, x)/2π + .5
+        const u = (x + 0.5) / W, phi = (u - 0.5) * 2 * Math.PI;
         const dx = Math.cos(phi) * ce, dz = -Math.sin(phi) * ce;
         let r, g, b;
-        if (cy >= 0) {                              // Himmel
+        if (cy >= 0) {
           const t = Math.pow(1 - cy, 2.2);
-          r = mix(0.30, 0.86, t) * 1.0;
-          g = mix(0.48, 0.90, t) * 1.0;
-          b = mix(0.86, 0.95, t) * 1.0;
+          r = mix(0.30, 0.86, t) * f; g = mix(0.48, 0.90, t) * f; b = mix(0.86, 0.95, t) * f;
           const cos = dx * sunDir.x + cy * sunDir.y + dz * sunDir.z;
           const ang = Math.acos(Math.min(1, Math.max(-1, cos)));
-          if (ang < 0.05) { r = 780; g = 720; b = 610; }
+          if (ang < 0.05) { r = 780 * f; g = 720 * f; b = 610 * f; }
           else if (ang < 0.7) {
-            const gl = Math.pow(1 - ang / 0.7, 4) * 22;
+            const gl = Math.pow(1 - ang / 0.7, 4) * 22 * f;
             r += gl; g += gl * 0.93; b += gl * 0.78;
           }
-        } else {                                    // Boden / Umgebung
-          const t = Math.min(1, -cy * 2.5);
-          const s = mix(0.30, 0.10, t);
+        } else {
+          const t = Math.min(1, -cy * 2.5), s = mix(0.30, 0.10, t) * f;
           r = s * 0.95; g = s * 0.92; b = s * 0.86;
         }
         const i = (y * W + x) * 4;
@@ -215,96 +230,107 @@ function start(modelURL) {
     tex.mapping = THREE.EquirectangularReflectionMapping;
     tex.colorSpace = THREE.LinearSRGBColorSpace;
     tex.minFilter = tex.magFilter = THREE.LinearFilter;
-    tex.generateMipmaps = false;
-    tex.needsUpdate = true;
+    tex.generateMipmaps = false; tex.needsUpdate = true;
     return tex;
   }
 
-  /* ---------- Hauptkomponente ---------- */
+  /* ---------------- Halle: Renderer, Licht, Boden ---------------- */
   AFRAME.registerComponent('hall', {
     init() {
-      const sceneEl = this.el;
       this.layers = {};
-      this.shadowCasters = [];
-      sceneEl.addEventListener('loaded', () => this.setup());
+      this.emissives = { leuchte: [], band: [] };
+      this.el.addEventListener('loaded', () => this.setup());
     },
 
     setup() {
-      const sceneEl = this.el;
-      const r = sceneEl.renderer, scene = sceneEl.object3D;
+      const sceneEl = this.el, r = sceneEl.renderer, scene = sceneEl.object3D;
       r.toneMapping = THREE.ACESFilmicToneMapping;
       r.toneMappingExposure = 1.0;
       r.shadowMap.enabled = true;
       r.shadowMap.type = THREE.PCFShadowMap;
       if (r.xr && r.xr.setFoveation) { try { r.xr.setFoveation(0.6); } catch (e) {} }
-
       this.pmrem = new THREE.PMREMGenerator(r);
 
-      /* Sonne */
-      this.sun = new THREE.DirectionalLight(0xfff1dd, 2.8);
+      this.sun = new THREE.DirectionalLight(0xfff1dd, 2.5);
       this.sun.castShadow = true;
       const s = this.sun.shadow;
       s.mapSize.set(2048, 2048);
-      s.camera.left = -30; s.camera.right = 30;
-      s.camera.top = 30; s.camera.bottom = -30;
-      s.camera.near = 10; s.camera.far = 170;
-      s.bias = -0.0006; s.normalBias = 0.035;
+      s.camera.left = -30; s.camera.right = 30; s.camera.top = 30; s.camera.bottom = -30;
+      s.camera.near = 10; s.camera.far = 170; s.bias = -0.0006; s.normalBias = 0.035;
       this.sunTarget = new THREE.Object3D();
       this.sunTarget.position.set(CENTER.x, FLOOR + 3, CENTER.z);
       scene.add(this.sunTarget, this.sun);
       this.sun.target = this.sunTarget;
 
-      /* Füll-Licht (Himmel/Boden), das Environment macht den Rest */
-      scene.add(new THREE.HemisphereLight(0xbed6f2, 0x6d665c, 0.12));
+      this.hemi = new THREE.HemisphereLight(0xbed6f2, 0x6d665c, 0.12);
+      scene.add(this.hemi);
 
-      /* Aussenboden – 2 cm unter der Bodenplatte, kein Z-Fighting */
-      const gmat = new THREE.MeshStandardMaterial({ color: 0x5d5850, roughness: 1.0, metalness: 0 });
-      const ground = new THREE.Mesh(new THREE.PlaneGeometry(600, 600), gmat);
+      /* Hallenleuchten als Lichtquellen (Geometrie steckt im Modell) */
+      this.points = [];
+      [[7, 4.5], [7, 12.5], [16, 4.5], [16, 12.5], [25, 4.5], [25, 12.5]].forEach(([x, z]) => {
+        const p = new THREE.PointLight(0xfff0dc, 0, 30, 2);
+        p.position.set(x, 12.0, z);
+        scene.add(p); this.points.push(p);
+      });
+
+      const ground = new THREE.Mesh(
+        new THREE.PlaneGeometry(600, 600),
+        new THREE.MeshStandardMaterial({ color: 0x5d5850, roughness: 1.0, metalness: 0 }));
       ground.rotation.x = -Math.PI / 2;
       ground.position.set(CENTER.x, FLOOR - 0.02, CENTER.z);
       ground.receiveShadow = true;
+      ground.name = 'Aussenboden';
       scene.add(ground);
       this.ground = ground;
 
-      this.setSun(135, 42);
+      this.az = 135; this.elv = 42;
+      this.apply();
       r.shadowMap.autoUpdate = false;
       r.shadowMap.needsUpdate = true;
-      this.el.emit('hall-ready');
+      sceneEl.emit('hall-ready');
     },
 
-    setSun(azDeg, elDeg) {
-      const az = azDeg * Math.PI / 180, ev = elDeg * Math.PI / 180;
+    apply() {
+      const base = MODES[state.mode];
+      const roof = state.layers.dach;          // Dach schluckt das Himmelslicht
+      const m = {
+        sun: base.sun, sky: base.sky,
+        env: base.env * (roof ? 0.42 : 1),
+        pt:  roof ? Math.max(base.pt, 15) : base.pt,
+        em:  roof ? Math.max(base.em, 0.55) : base.em,
+        hemi: roof ? 0.5 : 1
+      };
+      const az = this.az * Math.PI / 180, ev = this.elv * Math.PI / 180;
       const d = new THREE.Vector3(Math.cos(ev) * Math.sin(az), Math.sin(ev), Math.cos(ev) * Math.cos(az));
-      this.sunDir = d;
       this.sun.position.copy(this.sunTarget.position).addScaledVector(d, 90);
-      this.sun.intensity = 0.6 + 2.6 * Math.max(0.12, Math.sin(ev));
+      this.sun.intensity = (0.6 + 2.6 * Math.max(0.12, Math.sin(ev))) * m.sun;
+      this.sun.castShadow = state.shadows && m.sun > 0.15;
+      this.hemi.intensity = 0.12 * m.sky * m.hemi;
+      this.points.forEach(p => p.intensity = m.pt);
+      this.emissives.leuchte.forEach(mat => mat.emissiveIntensity = m.em);
+      this.emissives.band.forEach(mat => mat.emissiveIntensity = 0.3 + 0.9 * m.sky);
 
-      const tex = envTexture(d);
+      const tex = envTexture(d, m.sky);
       const env = this.pmrem.fromEquirectangular(tex).texture;
       const scene = this.el.object3D;
       if (scene.environment) scene.environment.dispose();
       if (scene.background && scene.background.isTexture) scene.background.dispose();
       scene.environment = env;
       scene.background = tex;
-      scene.environmentIntensity = 0.70;
-      this.el.renderer.shadowMap.needsUpdate = true;
-    },
-
-    setShadows(on) {
-      this.sun.castShadow = on;
-      this.el.renderer.shadowMap.needsUpdate = true;
+      scene.environmentIntensity = m.env;
+      this.refresh();
     },
 
     refresh() { this.el.renderer.shadowMap.needsUpdate = true; }
   });
 
-  /* ---------- Modell: Ebenen, Schatten, Transparenzen ---------- */
+  /* ---------------- Modell einrichten ---------------- */
   AFRAME.registerComponent('model-setup', {
     init() {
       this.el.addEventListener('model-loaded', e => {
         const root = e.detail.model, hall = this.el.sceneEl.components.hall;
-        const groups = {};
-        let tris = 0;
+        const groups = {}; let tris = 0;
+        hall.pickables = [];
         root.traverse(o => {
           if (!o.isMesh) return;
           const layer = o.userData.layer || (o.parent && o.parent.userData.layer) || 'gebaeude';
@@ -313,77 +339,150 @@ function start(modelURL) {
           tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
           const m = o.material;
           m.envMapIntensity = 1.0;
-          if (m.transparent || (m.opacity !== undefined && m.opacity < 1)) {
-            m.depthWrite = false;
-            m.side = THREE.DoubleSide;
-            o.renderOrder = 3;
-            o.castShadow = o.receiveShadow = false;
+          if (m.name === 'Hallenleuchte') hall.emissives.leuchte.push(m);
+          if (m.name === 'Lichtband_Glas') hall.emissives.band.push(m);
+          if (m.transparent || m.opacity < 1) {
+            m.depthWrite = false; m.side = THREE.DoubleSide;
+            o.renderOrder = 3; o.castShadow = o.receiveShadow = false;
           } else {
-            o.castShadow = true;
-            o.receiveShadow = true;
+            o.castShadow = true; o.receiveShadow = true;
+            if (layer !== 'planung') hall.pickables.push(o);   // Teleportziele
           }
         });
         hall.layers = groups;
+        hall.pickables.push(hall.ground);
+        hall.apply();
+        hall.refresh();
         this.el.sceneEl.emit('model-ready', { tris: Math.round(tris) });
       });
     }
   });
 
-  /* ---------- Fortbewegung in VR ---------- */
+  /* ---------------- VR-Menü als Canvas-Tafel ---------------- */
+  const MENU = [
+    { t: 'head', label: 'Ebenen' },
+    { t: 'check', id: 'gebaeude', label: 'Gebäude & Boden' },
+    { t: 'check', id: 'dach', label: 'Dach & Beleuchtung' },
+    { t: 'check', id: 'stahlbau', label: 'Stahlbau & Treppe' },
+    { t: 'check', id: 'maschinen', label: 'Maschinen & Kran' },
+    { t: 'check', id: 'personen', label: 'Personen' },
+    { t: 'check', id: 'planung', label: 'Planungsflächen' },
+    { t: 'head', label: 'Licht' },
+    { t: 'mode', id: 'tag', label: 'Tageslicht' },
+    { t: 'mode', id: 'abend', label: 'Abend' },
+    { t: 'mode', id: 'kunst', label: 'Kunstlicht' },
+    { t: 'head', label: 'Standort' },
+    { t: 'btn', id: 'v:start', label: 'Startposition' },
+    { t: 'btn', id: 'v:bird', label: 'Vogelperspektive' },
+    { t: 'btn', id: 'v:doll', label: 'Puppenhaus 1:20' },
+    { t: 'btn', id: 'h:9.32', label: 'auf Galerie stellen' },
+    { t: 'btn', id: 'h:0', label: 'auf Bodenhöhe' }
+  ];
+  const MW = 440, MROW = 46, MHEAD = 36, MPAD = 14;
+  const MH = MPAD * 2 + 46 + MENU.reduce((a, i) => a + (i.t === 'head' ? MHEAD : MROW), 0);
+  const mcv = document.createElement('canvas');
+  mcv.width = MW; mcv.height = MH;
+  const mctx = mcv.getContext('2d');
+  let mrows = [];
+
+  function drawMenu() {
+    const c = mctx;
+    c.clearRect(0, 0, MW, MH);
+    c.fillStyle = 'rgba(14,18,25,0.94)';
+    c.fillRect(0, 0, MW, MH);
+    c.strokeStyle = 'rgba(255,255,255,0.18)'; c.lineWidth = 3;
+    c.strokeRect(1.5, 1.5, MW - 3, MH - 3);
+    c.fillStyle = '#ff8c1a'; c.fillRect(0, 0, MW, 5);
+    c.font = '600 25px system-ui, sans-serif'; c.fillStyle = '#e8ecf2';
+    c.fillText('Neubau · Halle', MPAD, 36);
+    let y = MPAD + 46;
+    mrows = [];
+    MENU.forEach(it => {
+      if (it.t === 'head') {
+        c.font = '600 16px system-ui, sans-serif'; c.fillStyle = '#8e99a8';
+        c.fillText(it.label.toUpperCase(), MPAD, y + 24);
+        y += MHEAD;
+        return;
+      }
+      const on = it.t === 'check' ? state.layers[it.id]
+               : it.t === 'mode' ? state.mode === it.id : false;
+      c.fillStyle = it.t === 'btn' ? 'rgba(255,255,255,0.08)'
+                  : on ? 'rgba(255,140,26,0.22)' : 'rgba(255,255,255,0.05)';
+      c.beginPath();
+      c.roundRect(MPAD, y + 3, MW - 2 * MPAD, MROW - 8, 9);
+      c.fill();
+      if (it.t !== 'btn') {
+        c.fillStyle = on ? '#ff8c1a' : 'rgba(255,255,255,0.18)';
+        c.beginPath(); c.roundRect(MPAD + 12, y + 13, 22, 22, 6); c.fill();
+        if (on) {
+          c.strokeStyle = '#14181f'; c.lineWidth = 4; c.lineCap = 'round';
+          c.beginPath(); c.moveTo(MPAD + 17, y + 24); c.lineTo(MPAD + 22, y + 29);
+          c.lineTo(MPAD + 30, y + 18); c.stroke();
+        }
+      }
+      c.font = '400 21px system-ui, sans-serif';
+      c.fillStyle = it.t === 'btn' ? '#dbe2ea' : (on ? '#ffffff' : '#aab3c0');
+      c.fillText(it.label, MPAD + (it.t === 'btn' ? 16 : 48), y + 31);
+      mrows.push({ y0: y, y1: y + MROW, it });
+      y += MROW;
+    });
+    if (window.menuTex) window.menuTex.needsUpdate = true;
+  }
+
+  /* ---------------- Fortbewegung, Fliegen, Teleport ---------------- */
   AFRAME.registerComponent('locomotion', {
-    schema: { speed: { default: 2.6 } },
+    schema: { speed: { default: 2.6 }, climb: { default: 2.2 } },
     init() {
       this.rig = this.el.object3D;
       this.camEl = document.getElementById('cam');
       this.move = { x: 0, y: 0 };
-      this.turn = 0; this.turnArmed = true;
-      this.boost = 1;
-      this.tmp = new THREE.Vector3();
+      this.rstick = { x: 0, y: 0 };
+      this.turnArmed = true; this.boost = 1;
       this.q = new THREE.Quaternion();
+      this.ray = new THREE.Raycaster(); this.ray.far = 80;
+      this.frame = 0; this.aiming = false; this.lastAim = null;
+      this.keys = {};
 
       const L = document.getElementById('hand-l'), R = document.getElementById('hand-r');
+      this.lHand = L;
       L.addEventListener('thumbstickmoved', e => { this.move.x = e.detail.x; this.move.y = e.detail.y; });
-      R.addEventListener('thumbstickmoved', e => { this.turn = e.detail.x; });
-      L.addEventListener('gripdown', () => this.boost = 2.6);
+      R.addEventListener('thumbstickmoved', e => { this.rstick.x = e.detail.x; this.rstick.y = e.detail.y; });
+      L.addEventListener('gripdown', () => this.boost = 3);
       L.addEventListener('gripup', () => this.boost = 1);
-      R.addEventListener('abuttondown', () => window.toggleLayer('planung'));
-      R.addEventListener('bbuttondown', () => window.setView('doll'));
-      L.addEventListener('xbuttondown', () => window.setView('start'));
-      L.addEventListener('ybuttondown', () => window.cycleSun());
+      R.addEventListener('gripdown', () => this.boost = 3);
+      R.addEventListener('gripup', () => this.boost = 1);
+      L.addEventListener('triggerdown', () => this.aiming = true);
+      L.addEventListener('triggerup', () => { this.aiming = false; this.teleport(); });
+      L.addEventListener('xbuttondown', () => window.act('menu'));
+      L.addEventListener('ybuttondown', () => window.act('nextmode'));
+      R.addEventListener('abuttondown', () => window.act('check:planung'));
+      R.addEventListener('bbuttondown', () => window.act('v:doll'));
 
-      /* Teleport mit rechtem Trigger */
-      this.ray = new THREE.Raycaster();
-      this.targets = [];
-      ['floor', 'gallery'].forEach((n, i) => {
-        const p = new THREE.Mesh(new THREE.PlaneGeometry(400, 400),
-          new THREE.MeshBasicMaterial({ visible: false }));
-        p.rotation.x = -Math.PI / 2;
-        p.position.set(CENTER.x, i ? GALLERY : FLOOR, CENTER.z);
-        this.el.sceneEl.object3D.add(p);
-        this.targets.push(p);
-      });
       this.marker = document.getElementById('tpmark');
-      R.addEventListener('triggerdown', () => { this.aiming = true; });
-      R.addEventListener('triggerup', () => { this.aiming = false; this.doTeleport(); });
-      this.rHand = R;
+      window.addEventListener('keydown', e => this.keys[e.code] = true);
+      window.addEventListener('keyup', e => this.keys[e.code] = false);
     },
 
-    aimPoint() {
-      const o = this.rHand.object3D;
+    pick() {
+      const o = this.lHand.object3D;
       const origin = new THREE.Vector3(), dir = new THREE.Vector3(0, 0, -1);
       o.getWorldPosition(origin);
       dir.applyQuaternion(o.getWorldQuaternion(this.q)).normalize();
       this.ray.set(origin, dir);
-      const hit = this.ray.intersectObjects(this.targets, false)[0];
-      return hit && hit.distance < 60 ? hit.point : null;
+      const hall = this.el.sceneEl.components.hall;
+      const list = (hall && hall.pickables) ? hall.pickables.filter(m => m.visible) : [];
+      const hits = this.ray.intersectObjects(list, false);
+      for (const h of hits) {
+        if (h.face && h.face.normal.y > 0.55) return h.point;   // begehbare Fläche
+      }
+      return null;
     },
 
-    doTeleport() {
-      const p = this.lastAim;
+    teleport() {
       this.marker.setAttribute('visible', false);
+      const p = this.lastAim;
       if (!p) return;
-      const cam = new THREE.Vector3();
-      this.camEl.object3D.getWorldPosition(cam);
+      const cam = this.camEl.object3D.getWorldPosition(new THREE.Vector3());
       this.rig.position.x += p.x - cam.x;
       this.rig.position.z += p.z - cam.z;
       this.rig.position.y = p.y;
@@ -391,14 +490,18 @@ function start(modelURL) {
 
     tick(t, dt) {
       const d = Math.min(dt, 60) / 1000;
+      this.frame++;
 
       if (this.aiming) {
-        const p = this.aimPoint();
-        this.lastAim = p;
-        this.marker.setAttribute('visible', !!p);
-        if (p) this.marker.object3D.position.set(p.x, p.y + 0.02, p.z);
+        if (this.frame % 3 === 0) {
+          this.lastAim = this.pick();
+          this.marker.setAttribute('visible', !!this.lastAim);
+          if (this.lastAim) this.marker.object3D.position.set(
+            this.lastAim.x, this.lastAim.y + 0.03, this.lastAim.z);
+        }
       }
 
+      /* gehen */
       if (Math.abs(this.move.x) > 0.12 || Math.abs(this.move.y) > 0.12) {
         const yaw = new THREE.Euler().setFromQuaternion(
           this.camEl.object3D.getWorldQuaternion(this.q), 'YXZ').y;
@@ -407,139 +510,203 @@ function start(modelURL) {
         this.rig.position.z += (Math.cos(yaw) * -this.move.y - Math.sin(yaw) * this.move.x) * sp;
       }
 
-      if (Math.abs(this.turn) > 0.7) {
+      /* rechter Stick: seitlich drehen, vor/zurück steigen und sinken */
+      const rx = this.rstick.x, ry = this.rstick.y;
+      if (Math.abs(rx) > 0.7 && Math.abs(rx) > Math.abs(ry)) {
         if (this.turnArmed) {
           this.turnArmed = false;
-          const ang = this.turn > 0 ? -Math.PI / 6 : Math.PI / 6;
+          const ang = rx > 0 ? -Math.PI / 6 : Math.PI / 6;
           const cam = this.camEl.object3D.getWorldPosition(new THREE.Vector3());
           const off = this.rig.position.clone().sub(cam).applyAxisAngle(new THREE.Vector3(0, 1, 0), ang);
           this.rig.position.copy(cam.add(off));
           this.rig.rotation.y += ang;
         }
-      } else if (Math.abs(this.turn) < 0.3) this.turnArmed = true;
+      } else if (Math.abs(rx) < 0.3) this.turnArmed = true;
+
+      if (Math.abs(ry) > 0.15 && Math.abs(ry) >= Math.abs(rx)) {
+        this.rig.position.y -= ry * this.data.climb * this.boost * d;
+      }
+
+      /* Desktop: R / F für hoch und runter */
+      if (this.keys.KeyR) this.rig.position.y += this.data.climb * 1.6 * d;
+      if (this.keys.KeyF) this.rig.position.y -= this.data.climb * 1.6 * d;
+
+      this.rig.position.y = Math.max(FLOOR - 1.5, Math.min(FLOOR + 60, this.rig.position.y));
     }
   });
 
-  /* ---------- DOM der Szene ---------- */
+  /* ---------------- Szenen-DOM ---------------- */
   const scene = document.createElement('a-scene');
   scene.setAttribute('hall', '');
-  scene.setAttribute('renderer',
-    'colorManagement: true; antialias: true; highRefreshRate: true');
+  scene.setAttribute('renderer', 'colorManagement: true; antialias: true; highRefreshRate: true');
   scene.setAttribute('shadow', 'type: pcf');
   scene.setAttribute('light', 'defaultLightsEnabled: false');
   scene.setAttribute('device-orientation-permission-ui', 'enabled: false');
   scene.innerHTML = `
-    <a-entity id="rig" position="${VIEWS.start.p.join(' ')}"
-              rotation="0 ${VIEWS.start.r} 0" locomotion>
-      <a-entity id="cam" camera="fov: 62; near: 0.05; far: 600"
+    <a-entity id="rig" position="${VIEWS.start.p.join(' ')}" rotation="0 ${VIEWS.start.r} 0" locomotion>
+      <a-entity id="cam" camera="fov: 62; near: 0.05; far: 800"
                 position="0 1.65 0" look-controls="pointerLockEnabled: false"
                 wasd-controls="acceleration: 42; fly: false"></a-entity>
-      <a-entity id="hand-l" oculus-touch-controls="hand: left"></a-entity>
-      <a-entity id="hand-r" oculus-touch-controls="hand: right"></a-entity>
+      <a-entity id="hand-l" oculus-touch-controls="hand: left">
+        <a-entity id="menu" class="vrmenu" visible="true"
+                  position="0 0.085 0.015" rotation="-52 0 0"
+                  geometry="primitive: plane; width: 0.27; height: ${(0.27 * MH / MW).toFixed(3)}"
+                  material="shader: flat; transparent: true; side: double"></a-entity>
+      </a-entity>
+      <a-entity id="hand-r" laser-controls="hand: right"
+                raycaster="objects: .vrmenu; far: 4; lineColor: #ff8c1a; lineOpacity: 0.85"></a-entity>
     </a-entity>
-    <a-entity id="tpmark" visible="false"
-              geometry="primitive: torus; radius: 0.42; radiusTubular: 0.045; segmentsTubular: 32"
-              rotation="-90 0 0"
+    <a-entity id="tpmark" visible="false" rotation="-90 0 0"
+              geometry="primitive: torus; radius: 0.42; radiusTubular: 0.05; segmentsTubular: 28"
               material="shader: flat; color: #ff8c1a; opacity: 0.9; transparent: true"></a-entity>
     <a-entity id="model" model-setup gltf-model="url(${modelURL})"></a-entity>`;
   document.body.appendChild(scene);
 
-  /* ---------- Bedienung ---------- */
-  const ui = document.getElementById('ui'), hud = document.getElementById('hud');
+  /* Menü-Textur anhängen, sobald die Tafel existiert */
+  scene.addEventListener('loaded', () => {
+    const menuEl = document.getElementById('menu');
+    const tex = new THREE.CanvasTexture(mcv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    window.menuTex = tex;
+    const setTex = () => {
+      const m = menuEl.getObject3D('mesh');
+      if (!m) return setTimeout(setTex, 100);
+      m.material.map = tex; m.material.needsUpdate = true;
+    };
+    setTex();
+    drawMenu();
 
-  scene.addEventListener('model-ready', e => {
-    document.getElementById('boot').classList.add('hide');
-    setTimeout(() => document.getElementById('boot').remove(), 600);
-    ui.hidden = false; hud.hidden = false;
-    hud.textContent = e.detail.tris.toLocaleString('de-CH') + ' Dreiecke';
-    let n = 0, t0 = performance.now();
-    setInterval(() => {
-      const now = performance.now();
-      hud.textContent = Math.round(n * 1000 / (now - t0)) + ' fps · ' +
-        e.detail.tris.toLocaleString('de-CH') + ' Dreiecke';
-      n = 0; t0 = now;
-    }, 1000);
-    const tickEl = document.createElement('a-entity');
-    if (!AFRAME.components.fps) AFRAME.registerComponent('fps', { tick() { n++; } });
-    tickEl.setAttribute('fps', '');
-    scene.appendChild(tickEl);
+    menuEl.addEventListener('click', e => {
+      const uv = e.detail.intersection && e.detail.intersection.uv;
+      if (!uv) return;
+      const py = (1 - uv.y) * MH;
+      const row = mrows.find(r => py >= r.y0 && py < r.y1);
+      if (!row) return;
+      const it = row.it;
+      window.act(it.t === 'check' ? 'check:' + it.id : it.t === 'mode' ? 'mode:' + it.id : it.id);
+    });
   });
 
-  window.toggleLayer = function (name, force) {
-    const hall = scene.components.hall;
-    const box = document.querySelector(`[data-layer="${name}"]`);
-    const on = force !== undefined ? force : !box.checked;
-    box.checked = on;
-    (hall.layers[name] || []).forEach(o => o.visible = on);
-    hall.refresh();
-  };
-  document.querySelectorAll('[data-layer]').forEach(b =>
-    b.addEventListener('change', () => window.toggleLayer(b.dataset.layer, b.checked)));
+  /* ---------------- Aktionen (Desktop + VR gemeinsam) ---------------- */
+  const hallOf = () => scene.components.hall;
 
-  let doll = false;
+  window.act = function (cmd) {
+    const [k, v] = cmd.split(':');
+    const hall = hallOf();
+    if (k === 'check') {
+      state.layers[v] = !state.layers[v];
+      (hall.layers[v] || []).forEach(o => o.visible = state.layers[v]);
+      const box = document.querySelector(`[data-layer="${v}"]`);
+      if (box) box.checked = state.layers[v];
+      if (v === 'dach') hall.apply(); else hall.refresh();
+    } else if (k === 'mode') {
+      state.mode = v;
+      document.getElementById('mode').value = v;
+      hall.apply();
+    } else if (k === 'nextmode') {
+      const ks = Object.keys(MODES);
+      window.act('mode:' + ks[(ks.indexOf(state.mode) + 1) % ks.length]);
+    } else if (k === 'menu') {
+      const m = document.getElementById('menu');
+      m.setAttribute('visible', !m.getAttribute('visible'));
+    } else if (k === 'v') {
+      window.setView(v);
+    } else if (k === 'h') {
+      const rig = document.getElementById('rig').object3D;
+      rig.position.y = +v === 0 ? FLOOR : (+v > 5 ? +v : rig.position.y + +v);
+    }
+    drawMenu();
+  };
+
   window.setView = function (key) {
-    const rig = document.getElementById('rig'), model = document.getElementById('model');
-    const hall = scene.components.hall;
+    const rig = document.getElementById('rig').object3D;
+    const model = document.getElementById('model').object3D;
+    const camEl = document.getElementById('cam');
+    const hall = hallOf();
     if (key === 'doll') {
-      doll = !doll;
-      const s = doll ? 0.05 : 1;
-      const lc0 = document.getElementById('cam').components['look-controls'];
-      if (lc0 && doll) lc0.pitchObject.rotation.x = -18 * Math.PI / 180;
-      const cam = document.getElementById('cam').object3D.getWorldPosition(new THREE.Vector3());
+      state.doll = !state.doll;
+      const s = state.doll ? 0.05 : 1;
+      const lc = camEl.components['look-controls'];
+      if (lc && state.doll) lc.pitchObject.rotation.x = -18 * Math.PI / 180;
+      const cam = camEl.object3D.getWorldPosition(new THREE.Vector3());
       const yaw = new THREE.Euler().setFromQuaternion(
-        document.getElementById('cam').object3D.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y;
-      model.object3D.scale.setScalar(s);
-      if (doll) {
-        const tgt = new THREE.Vector3(cam.x - Math.sin(yaw) * 2.6, cam.y - 0.95, cam.z - Math.cos(yaw) * 2.6);
-        model.object3D.position.set(tgt.x - CENTER.x * s, tgt.y - (FLOOR + 5) * s, tgt.z - CENTER.z * s);
-      } else model.object3D.position.set(0, 0, 0);
+        camEl.object3D.getWorldQuaternion(new THREE.Quaternion()), 'YXZ').y;
+      model.scale.setScalar(s);
+      if (state.doll) {
+        const tx = cam.x - Math.sin(yaw) * 2.6, tz = cam.z - Math.cos(yaw) * 2.6;
+        model.position.set(tx - CENTER.x * s, (cam.y - 0.95) - (FLOOR + 5) * s, tz - CENTER.z * s);
+      } else model.position.set(0, 0, 0);
       hall.refresh();
       return;
     }
-    if (doll) window.setView('doll');
+    if (state.doll) window.setView('doll');
     const v = VIEWS[key];
-    rig.object3D.position.set(v.p[0], v.p[1], v.p[2]);
-    rig.object3D.rotation.set(0, v.r * Math.PI / 180, 0);
-    const lc = document.getElementById('cam').components['look-controls'];
+    rig.position.set(v.p[0], v.p[1], v.p[2]);
+    rig.rotation.set(0, v.r * Math.PI / 180, 0);
+    const lc = camEl.components['look-controls'];
     if (lc) { lc.yawObject.rotation.y = 0; lc.pitchObject.rotation.x = (v.pitch || 0) * Math.PI / 180; }
-    if (key === 'bird') { document.getElementById('fly').checked = true; applyFly(); }
   };
+
+  /* ---------------- Desktop-Panel verdrahten ---------------- */
+  document.querySelectorAll('[data-layer]').forEach(b =>
+    b.addEventListener('change', () => {
+      if (state.layers[b.dataset.layer] !== b.checked) window.act('check:' + b.dataset.layer);
+    }));
   document.querySelectorAll('[data-view]').forEach(b =>
-    b.addEventListener('click', () => window.setView(b.dataset.view)));
+    b.addEventListener('click', () => { window.setView(b.dataset.view); drawMenu(); }));
+  document.querySelectorAll('[data-h]').forEach(b =>
+    b.addEventListener('click', () => window.act('h:' + b.dataset.h)));
+  document.getElementById('mode').addEventListener('change', e => window.act('mode:' + e.target.value));
 
   const az = document.getElementById('az'), el = document.getElementById('el');
+  let sunTimer;
   function applySun() {
     document.getElementById('vaz').textContent = az.value + '°';
     document.getElementById('vel').textContent = el.value + '°';
-    scene.components.hall.setSun(+az.value, +el.value);
+    const h = hallOf(); h.az = +az.value; h.elv = +el.value; h.apply();
   }
-  let sunTimer;
   [az, el].forEach(s => s.addEventListener('input', () => {
     clearTimeout(sunTimer); sunTimer = setTimeout(applySun, 90);
   }));
-  window.cycleSun = function () {
-    az.value = (+az.value + 45) % 360;
-    el.value = 20 + ((+el.value + 20 - 20) % 60);
-    applySun();
-  };
-
   const ex = document.getElementById('ex');
   ex.addEventListener('input', () => {
     const v = ex.value / 100;
     document.getElementById('vex').textContent = v.toFixed(2);
     scene.renderer.toneMappingExposure = v;
   });
-  document.getElementById('sh').addEventListener('change', e =>
-    scene.components.hall.setShadows(e.target.checked));
-
-  function applyFly() {
-    document.getElementById('cam').setAttribute('wasd-controls',
-      'acceleration: 42; fly: ' + document.getElementById('fly').checked);
-  }
-  document.getElementById('fly').addEventListener('change', applyFly);
+  document.getElementById('sh').addEventListener('change', e => {
+    state.shadows = e.target.checked; hallOf().apply();
+  });
   document.getElementById('minb').addEventListener('click', e => {
-    ui.classList.toggle('min');
-    e.target.textContent = ui.classList.contains('min') ? '+' : '–';
+    uiEl.classList.toggle('min');
+    e.target.textContent = uiEl.classList.contains('min') ? '+' : '–';
+  });
+
+  /* ---------------- Ladebildschirm & HUD ---------------- */
+  function showUI() {
+    uiEl.hidden = false; hudEl.hidden = false;
+    const boot = document.getElementById('boot');
+    if (boot) { boot.classList.add('hide'); setTimeout(() => boot.remove(), 600); }
+  }
+  scene.addEventListener('hall-ready', showUI);
+  setTimeout(showUI, 20000);                       // Notausgang
+
+  let tris = 0, frames = 0, t0 = performance.now();
+  scene.addEventListener('model-ready', e => { tris = e.detail.tris; showUI(); });
+  if (!AFRAME.components.fps) AFRAME.registerComponent('fps', { tick() { frames++; } });
+  scene.addEventListener('hall-ready', () => {
+    const e = document.createElement('a-entity');
+    e.setAttribute('fps', ''); scene.appendChild(e);
+    setInterval(() => {
+      const now = performance.now();
+      const rig = document.getElementById('rig');
+      const h = rig ? (rig.object3D.position.y - FLOOR) : 0;
+      hudEl.textContent = Math.round(frames * 1000 / (now - t0)) + ' fps · ' +
+        (tris ? tris.toLocaleString('de-CH') + ' Dreiecke · ' : '') +
+        'Höhe ' + h.toFixed(1) + ' m';
+      frames = 0; t0 = now;
+    }, 1000);
   });
 }
 </script>
